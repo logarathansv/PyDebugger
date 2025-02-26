@@ -15,16 +15,24 @@ chat = AzureChatOpenAI(
     temperature=0.2
 )
 
-def debug_llm(user_code):
-    prompt = f"""
-        You are an expert Python debugger. Analyze the following Python code and identify errors.
-        Provide:
-        1️⃣ A clear explanation of the issue.
-        2️⃣ A step-by-step debugging guide.
-        3️⃣ Best practices to avoid similar errors in the future.
+memory = ConversationBufferMemory()
 
-        Return only debugging suggestions, not the full solution.
-    """
+conversation = ConversationChain(
+    llm=chat,
+    memory=memory
+)
+
+
+def debug_python_code(user_code):
+    # prompt = f"""
+    #     You are an expert Python debugger. Analyze the following Python code and identify errors.
+    #     Provide:
+    #     1️⃣ A clear explanation of the issue.
+    #     2️⃣ A step-by-step debugging guide.
+    #     3️⃣ Best practices to avoid similar errors in the future.
+
+    #     Return only debugging suggestions, not the full solution.
+    # """
     system_prompt = (
         "You are an AI debugging assistant. Your job is to analyze the given Python code, "
         "identify logical, syntax, or runtime issues, and suggest debugging steps. "
@@ -39,10 +47,24 @@ def debug_llm(user_code):
     Analyze the code and provide debugging hints without revealing the full solution.
     """
     
-    messages = [SystemMessage(content=prompt), HumanMessage(content=user_prompt)]
-    
-    response = chat.invoke(messages)
-    return response.content
+    prompt = f"""
+    You are an expert Python debugger. Analyze the following Python code and provide debugging hints **one at a time**.
+    Do NOT give the full solution immediately.
+    Each response should include:
+    1️⃣ The next step in debugging.
+    2️⃣ A short explanation.
+    3️⃣ Ask if the user wants another hint.
+
+    **Code:**
+    ```python
+    {user_code}
+    ```
+
+    Respond with only one debugging hint at a time.
+    """
+
+    response = conversation.predict(input=prompt)
+    return response
 
 if __name__ == "__main__":
     sample_code = """
@@ -54,6 +76,9 @@ if __name__ == "__main__":
     print(divide(10, 0))```
     """
     
-    debugging_tips = debug_llm(sample_code)
-    print("Debugging Suggestions:")
-    print(debugging_tips)
+    debugging_hint = debug_python_code(sample_code)
+    print(debugging_hint)
+
+    follow_up = "Yes, I need another hint."
+    more_hints = conversation.predict(input=follow_up)
+    print(more_hints)
