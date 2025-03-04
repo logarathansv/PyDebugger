@@ -24,14 +24,6 @@ conversation = ConversationChain(
 
 
 def debug_python_code(user_code):
-    # prompt = f"""
-    #     You are an expert Python debugger. Analyze the following Python code and identify errors.
-    #     Provide:
-    #     1️⃣ A clear explanation of the issue.
-    #     2️⃣ A step-by-step debugging guide.
-    #     3️⃣ Best practices to avoid similar errors in the future.
-
-    #     Return only debugging suggestions, not the full solution.
     # """
     system_prompt = (
         "You are an AI debugging assistant. Your job is to analyze the given Python code, "
