@@ -1,4 +1,5 @@
 import os
+from openai import BadRequestError
 import streamlit as st
 from langchain_community.document_loaders import PDFPlumberLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -125,6 +126,36 @@ def find_context(query, selected_pdfs):
             context_docs.extend(store.similarity_search(query))
     return context_docs
 
+def generate_follow_up_hint(chat_history, mode):
+    # Extract the conversation context
+    conversation_context = "\n".join([f"{msg['role']}: {msg['content']}" for msg in chat_history])
+    print(conversation_context)
+    # Define the follow-up hint prompt
+    if mode == "Programming Tutor":
+        prompt = """
+        You are a programming tutor. Provide another hint or clarification based on the conversation below.
+        Keep your response concise and helpful.
+
+        Conversation:
+        {conversation_context}
+
+        Hint:
+        """
+    elif mode == "Rubber Duck Assistant":
+        prompt = """
+        You are a rubber duck debugging assistant. Provide another guiding question or hint to help the user think through their problem.
+
+        Conversation:
+        {conversation_context}
+
+        Hint:
+        """
+
+    # Generate the follow-up hint
+    conversation_prompt = ChatPromptTemplate.from_template(prompt)
+    response_chain = conversation_prompt | LANGUAGE_MODEL
+    return response_chain.invoke({"conversation_context": conversation_context})
+
 # Generate AI Answer
 def generate_answer(query, context_docs, mode):
     context = "\n\n".join([doc.page_content[:50] for doc in context_docs])  # More context for accuracy
@@ -143,8 +174,12 @@ def generate_answer(query, context_docs, mode):
     # Rubber Duck Debugging Prompt
     elif mode == "Rubber Duck Assistant":
         prompt = """
-        You are a rubber duck debugging assistant. Help the user think through their code logically.
-        Ask guiding questions rather than directly solving the problem.
+        You are an expert Rubber Duck Python debugging assistant. Analyze the following Python code and provide debugging hints **one at a time**.
+        Do NOT give the full solution immediately.
+        Each response should include:
+        1️⃣ The next step in debugging.
+        2️⃣ A short explanation.
+        3️⃣ if the user wants another hint, give it unless it's obvious.
         
         Query: {query}
         Context: {context}
@@ -203,17 +238,35 @@ if selected_pdfs:
     user_query = st.chat_input("Ask a question about programming concepts or debugging...")
 
     if user_query:
+        # Add user query to chat history
         st.session_state.messages.append({"role": "user", "content": user_query})
         with st.chat_message("user"):
             st.markdown(user_query)
 
+        # Generate AI response
         with st.spinner("🔍 Searching resources..."):
             relevant_docs = find_context(user_query, selected_pdfs)
-            ai_response = generate_answer(user_query, relevant_docs, mode)
+            try:
+                ai_response = generate_answer(user_query, relevant_docs, mode)
+            except BadRequestError as e:
+                ai_response = "Sorry, I cannot provide a response to that query due to content filtering policies. Please rephrase your question."
 
+        # Add AI response to chat history
         with st.chat_message("assistant"):
             st.markdown(ai_response.content)
             st.session_state.messages.append({"role": "assistant", "content": ai_response.content})
 
+    # Add "Need another hint" button
+    if st.session_state.messages and st.session_state.messages[-1]["role"] == "assistant":
+        if st.button("Need another hint"):
+            # Generate a follow-up hint based on the conversation context
+            with st.spinner("🤔 Generating another hint..."):
+                try:
+                    follow_up_response = generate_follow_up_hint(st.session_state.messages, mode)
+                except BadRequestError as e:
+                    follow_up_response = "Sorry, I cannot provide a response to that query due to content filtering policies. Please rephrase your question."
+                with st.chat_message("assistant"):
+                    st.markdown(follow_up_response.content)
+                    st.session_state.messages.append({"role": "assistant", "content": follow_up_response.content})
 else:
     st.warning("⚠️ Please upload and select a document to start chatting.")
