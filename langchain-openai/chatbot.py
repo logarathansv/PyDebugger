@@ -41,12 +41,12 @@ LANGUAGE_MODEL = AzureChatOpenAI(
 # Constants
 PDF_STORAGE_PATH = 'document_store/pdfs/'
 PROMPT_TEMPLATE = """
-You are an expert programming assistant and rubber duck debugging companion. 
+You are an expert programming assistant and rubber duck debugging companion.
 Use the provided context to answer the query.
 If unsure, state that you don't know. Be concise and factual.
 
-Query: {user_query} 
-Context: {document_context} 
+Query: {user_query}
+Context: {document_context}
 Answer:
 """
 
@@ -65,9 +65,24 @@ if "vector_store" not in st.session_state:
         persist_directory="./chroma_db"
     )
 
+# def add_document(doc_text):
+#     doc_id = f"doc_{len(st.session_state.documents) + 1}"  # Unique ID
+#     st.session_state.documents[doc_id] = doc_text  # Store in session state
+
+#     # Add to Chroma Vector Store
+#     st.session_state.vector_store.add_texts([doc_text])
+
+#     # Persist the changes
+#     st.session_state.vector_store.persist()
+
+# # Load existing documents from Chroma
+# if st.session_state.vector_store._collection.count() > 0:
+#     all_docs = st.session_state.vector_store._collection.get(include=["documents"])
+#     st.session_state.documents = {f"doc_{i}": doc for i, doc in enumerate(all_docs["documents"], 1)}
+
 # Functions
 def save_uploaded_file(uploaded_file):
-    os.makedirs(PDF_STORAGE_PATH, exist_ok=True)
+    os.makedirs(PDF_STORAGE_PATH, exist_ok=True, )
     file_path = os.path.join(PDF_STORAGE_PATH, uploaded_file.name)
     with open(file_path, "wb") as file:
         file.write(uploaded_file.getbuffer())
@@ -152,10 +167,21 @@ def find_related_documents(query, num_docs=5):
     return st.session_state.vector_store.similarity_search(query, k=num_docs)
 
 def merge_context_chunks(chunks):
-    return "\n\n".join([doc.page_content for doc in chunks])
+    return "\n\n".join([doc.page_content[:500] for doc in chunks])
 
 def generate_answer(user_query, context_documents):
     context_text = merge_context_chunks(context_documents)
+    print(context_text)
+    if not st.session_state.documents:
+        PROMPT_TEMPLATE_DEBUG = """
+            You are an expert programming assistant and rubber duck debugging companion.
+            Use the provided context to answer the query.
+            If unsure, state that you don't know. Be concise and factual.
+
+            Query: {user_query}
+            Answer:
+            """
+        return conversation.predict(input=PROMPT_TEMPLATE_DEBUG)
     conversation_prompt = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
     response_chain = conversation_prompt | LANGUAGE_MODEL
     return response_chain.invoke({"user_query": user_query, "document_context": context_text})
@@ -215,7 +241,6 @@ st.markdown("### Remove Sources:")
 for file_name in list(st.session_state.documents.keys()):
     if st.button(f"🗑 Remove {file_name}"):
         remove_pdf(file_name)
-        st.experimental_rerun()
 
 # Chat Interface
 user_input = st.chat_input("Ask about programming concepts...")

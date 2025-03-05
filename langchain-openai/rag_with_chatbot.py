@@ -2,23 +2,23 @@ import os
 import streamlit as st
 from langchain_community.document_loaders import PDFPlumberLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.vectorstores import InMemoryVectorStore
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
-from langchain.vectorstores import Chroma
-from langchain.memory import ConversationBufferMemory
-from langchain.chains import ConversationChain
 from dotenv import load_dotenv
-from langchain.schema import Document
+from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
+import time
 
-# Load environment variables
 load_dotenv()
 
-# Initialize embeddings
-embeddings = AzureOpenAIEmbeddings(
-    model="text-embedding-ada-002",
-    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-    openai_api_version="2024-08-01-preview",
-    api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+AZURE_EMBEDDING_ENDPOINT = os.getenv("AZURE_EMBEDDING_OPENAI")
+AZURE_EMBEDDING_API = os.getenv("AZURE_EMBEDDING_API_KEY")
+AZURE_EMBEDDING_DEPLOYMENT = os.getenv("AZURE_EMBEDDING_DEPLOYMENT")
+
+EMBEDDING_MODEL = AzureOpenAIEmbeddings(
+    model=AZURE_EMBEDDING_DEPLOYMENT,
+    azure_endpoint=AZURE_EMBEDDING_ENDPOINT,
+    openai_api_version="2023-05-15",
+    api_key=AZURE_EMBEDDING_API,
 )
 
 # Azure OpenAI API Configuration
@@ -29,47 +29,36 @@ AZURE_DEPLOYMENT_NAME = os.getenv("AZURE_DEPLOYMENT_NAME")
 # Initialize Azure LLM
 LANGUAGE_MODEL = AzureChatOpenAI(
     azure_endpoint=AZURE_OPENAI_ENDPOINT,
-    openai_api_version="2024-08-01-preview",
+    openai_api_version="2025-01-01-preview",
     deployment_name=AZURE_DEPLOYMENT_NAME,
     openai_api_key=AZURE_OPENAI_KEY,
     temperature=0.2
 )
+# Dark Mode UI
+st.markdown("""
+    <style>
+    .stApp { background-color: #0E1117; color: #FFFFFF; }
+    .stChatInput input { background-color: #1E1E1E !important; color: #FFFFFF !important; border: 1px solid #3A3A3A !important; }
+    .stChatMessage p, .stChatMessage div { color: #FFFFFF !important; }
+    .stFileUploader { background-color: #1E1E1E; border: 1px solid #3A3A3A; border-radius: 5px; padding: 15px; }
+    h1, h2, h3 { color: #00FFAA !important; }
+    </style>
+    """, unsafe_allow_html=True)
 
-# Constants
+# System Config
 PDF_STORAGE_PATH = 'document_store/pdfs/'
-PROMPT_TEMPLATE = """
-You are an expert programming assistant and rubber duck debugging companion. 
-Use the provided context to answer the query.
-If unsure, state that you don't know. Be concise and factual.
 
-Query: {user_query} 
-Context: {document_context} 
-Answer:
-"""
+# Store PDFs & Chat History Independently
+if "pdf_vector_stores" not in st.session_state:
+    st.session_state.pdf_vector_stores = {}
 
-# Initialize Memory for Debugging Chat
-memory = ConversationBufferMemory()
-conversation = ConversationChain(llm=LANGUAGE_MODEL, memory=memory)
+if "pdf_list" not in st.session_state:
+    st.session_state.pdf_list = []
 
-# Initialize ChromaDB
-if os.path.exists("./chroma_db"):
-    st.session_state.vector_store = Chroma(
-        collection_name="programming_docs",
-        embedding_function=embeddings,
-        persist_directory="./chroma_db"
-    )
-if "documents" not in st.session_state:
-    st.session_state.documents = {}
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
-if "vector_store" not in st.session_state:
-    st.session_state.vector_store = Chroma(
-        collection_name="programming_docs",
-        embedding_function=embeddings,
-        persist_directory="./chroma_db"
-    )
+if "messages" not in st.session_state:
+    st.session_state.messages = []  # FIX: Keeps messages even if PDFs are deleted
 
-# Functions
+# Save PDF
 def save_uploaded_file(uploaded_file):
     os.makedirs(PDF_STORAGE_PATH, exist_ok=True)
     file_path = os.path.join(PDF_STORAGE_PATH, uploaded_file.name)
@@ -77,186 +66,113 @@ def save_uploaded_file(uploaded_file):
         file.write(uploaded_file.getbuffer())
     return file_path
 
-def load_pdf_documents(file_path):
-    try:
-        loader = PDFPlumberLoader(file_path)
-        documents = loader.load()
+# Load & Chunk Documents
+def process_document(file_name, file_path):
+    loader = PDFPlumberLoader(file_path)
+    docs = loader.load()
+    chunker = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=500)
+    chunks = chunker.split_documents(docs)
+
+    vector_store = InMemoryVectorStore(EMBEDDING_MODEL)
+    vector_store.add_documents(chunks)
+    st.session_state.pdf_vector_stores[file_name] = vector_store
+
+    if file_name not in st.session_state.pdf_list:
+        st.session_state.pdf_list.append(file_name)
+
+# Search Relevant Docs
+def find_context(query, selected_pdfs):
+    context_docs = []
+    for pdf in selected_pdfs:
+        store = st.session_state.pdf_vector_stores.get(pdf)
+        if store:
+            context_docs.extend(store.similarity_search(query))
+    return context_docs
+
+# Generate AI Answer
+def generate_answer(query, context_docs, mode):
+    context = "\n\n".join([doc.page_content[:50] for doc in context_docs])  # More context for accuracy
+
+    # Curriculum-based Assistant Prompt
+    if mode == "Programming Tutor":
+        prompt = """
+        You are a programming tutor. Explain concepts clearly with examples and best practices.
+        If unsure, say so. Keep explanations concise and beginner-friendly.
         
-        valid_documents = []
-        for i, doc in enumerate(documents):
-            if doc.page_content.strip():  # Only include pages with valid text content
-                valid_documents.append(doc)
-            else:
-                st.warning(f"Skipping Page {i + 1} in {file_path} (no text content).")
-        
-        return valid_documents
-    except Exception as e:
-        st.error(f"Error loading PDF: {e}")
-        return []
-
-def chunk_documents(raw_documents):
-    return RecursiveCharacterTextSplitter(
-        chunk_size=3000,
-        chunk_overlap=500
-    ).split_documents(raw_documents)
-
-def index_documents(file_name, document_chunks):
-    # Extract text content
-    processed_texts = []
-    for chunk in document_chunks:
-        if hasattr(chunk, "page_content") and chunk.page_content.strip():
-            processed_texts.append(chunk.page_content)
-        else:
-            st.warning(f"Skipping invalid or empty chunk in file: {file_name}")
-
-    if not processed_texts:
-        raise ValueError(f"No valid text found in document chunks for file: {file_name}")
-
-    # Convert plain text back into `Document` objects
-    document_objects = [Document(page_content=text) for text in processed_texts]
-
-    # Debugging: Print the first few documents to ensure they are correct
-    st.write(f"First few document objects for {file_name}:")
-    for doc in document_objects[:3]:
-        st.write(doc.page_content)
-
-    # Add documents to vector store
-    try:
-        st.session_state.vector_store.add_texts(
-            texts=[doc.page_content for doc in document_objects],
-            metadatas=[{"source": file_name} for _ in document_objects]
-        )
-        st.session_state.vector_store.persist()
-        st.session_state.documents[file_name] = document_objects  # Store as Documents
-    except Exception as e:
-        st.error(f"Error adding documents to vector store: {e}")
-
-def remove_pdf(file_name):
-    if file_name in st.session_state.documents:
-        del st.session_state.documents[file_name]
-
-        # Remove documents from ChromaDB by filtering by metadata (source)
-        st.session_state.vector_store.delete(
-            where={"source": file_name}  # Deletes all docs with this source
-        )
-
-        # Persist the changes
-        st.session_state.vector_store.persist()
-
-def find_related_documents(query, num_docs=5):
-    return st.session_state.vector_store.similarity_search(query, k=num_docs)
-
-def merge_context_chunks(chunks):
-    return "\n\n".join([doc.page_content for doc in chunks])
-
-def generate_answer(user_query, context_documents):
-    context_text = merge_context_chunks(context_documents)
-    conversation_prompt = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
-    response_chain = conversation_prompt | LANGUAGE_MODEL
-    return response_chain.invoke({"user_query": user_query, "document_context": context_text})
-
-def debug_python_code(user_code):
-    """Analyzes Python code and provides debugging hints based on real issues."""
-    prompt = f"""
-    You are an expert Python debugger. Analyze the following Python code.
+        Query: {query}
+        Context: {context}
+        Answer:
+        """
     
-    - If there are **syntax errors**, identify them first.
-    - If the syntax is correct, look for **logical errors**.
-    - Provide **one hint at a time**, guiding the user step-by-step.
-    - If the code is correct, explain why it works.
-    - Always ask if the user needs another hint.
-
-    Code:
-    ```python
-    {user_code}
-    ```
-
-    Respond with:
-    - A **brief debugging hint**.
-    - Ask if the user wants another hint.
-    """
-    response = conversation.predict(input=prompt)
-    return response
-
-# UI Layout
-st.title("📘 Curriculum-Based Chatbot & Python Debugging Assistant (Azure GPT-4)")
-st.markdown("### Chat with your Programming Documents or Debug Python Code")
-
-# Side-by-Side Layout
-col1, col2 = st.columns([2, 1])
-
-# Column 1: Chat and Document Management
-with col1:
-    # File Upload Section
-    uploaded_pdf = st.file_uploader("Upload Programming Document (PDF)", type="pdf", accept_multiple_files=True)
-
-    if uploaded_pdf:
-        for pdf in uploaded_pdf:
-            if pdf.name not in st.session_state.documents:
-                saved_path = save_uploaded_file(pdf)
-                raw_docs = load_pdf_documents(saved_path)
-                processed_chunks = chunk_documents(raw_docs)
-                index_documents(pdf.name, processed_chunks)
-        st.success("✅ Documents processed! Select sources to use.")
-
-    # Show uploaded PDFs with checkboxes
-    st.markdown("### Select Sources to Use:")
-    selected_pdfs = []
-    for file_name in st.session_state.documents.keys():
-        if st.checkbox(file_name, value=True):
-            selected_pdfs.append(file_name)
-
-    # Allow removing PDFs
-    st.markdown("### Remove Sources:")
-    for file_name in list(st.session_state.documents.keys()):
-        if st.button(f"🗑 Remove {file_name}"):
-            remove_pdf(file_name)
-            st.experimental_rerun()
-
-    # Chat Interface
-    user_input = st.chat_input("Ask about programming concepts...")
-
-    if user_input:
-        with st.chat_message("user"):
-            st.write(user_input)
+    # Rubber Duck Debugging Prompt
+    elif mode == "Rubber Duck Assistant":
+        prompt = """
+        You are a rubber duck debugging assistant. Help the user think through their code logically.
+        Ask guiding questions rather than directly solving the problem.
         
-        with st.spinner("Thinking..."):
-            selected_chunks = []
-            for pdf in selected_pdfs:
-                selected_chunks.extend(st.session_state.documents[pdf])
-            relevant_docs = find_related_documents(user_input)
-            ai_response = generate_answer(user_input, relevant_docs)
-            
-        st.session_state.chat_history.append(("user", user_input))
-        st.session_state.chat_history.append(("assistant", ai_response))
+        Query: {query}
+        Context: {context}
+        Answer:
+        """
 
-    # Display Chat History
-    st.markdown("### Chat History")
-    for role, message in st.session_state.chat_history:
-        with st.chat_message(role):
-            st.write(message)
+    conversation_prompt = ChatPromptTemplate.from_template(prompt)
+    response_chain = conversation_prompt | LANGUAGE_MODEL
 
-# Column 2: Debugging Section
-with col2:
-    st.markdown("## 🐞 Python Debugging Assistant")
-    user_code = st.text_area("Paste your Python code here:")
+    time.sleep(20)
+    return response_chain.invoke({"query": query, "context": context})
 
-    if st.button("Debug Code"):
-        if user_code.strip():
-            debugging_hint = debug_python_code(user_code)
+# UI Header
+st.title("💡 Curriculum-Based Programming Chatbot & Debugging Assistant")
+st.markdown("---")
 
-            # Store in chat history
-            st.session_state.chat_history.append(("debugger", debugging_hint))
-            
-            with st.chat_message("debugger"):
-                st.write(debugging_hint)
+# Sidebar - Upload PDFs
+st.sidebar.header("📤 Upload Programming Resources")
+uploaded_pdfs = st.sidebar.file_uploader("Upload PDFs (Textbooks, Docs, etc.)", type="pdf", accept_multiple_files=True)
 
-            # Add a follow-up hint button directly in response
-            if st.button("🔄 Need another hint?"):
-                more_hints = conversation.predict(input="Yes, I need another hint.")
-                st.session_state.chat_history.append(("debugger", more_hints))
-                with st.chat_message("debugger"):
-                    st.write(more_hints)
+# Process New PDFs
+if uploaded_pdfs:
+    for pdf in uploaded_pdfs:
+        if pdf.name not in st.session_state.pdf_vector_stores:
+            file_path = save_uploaded_file(pdf)
+            process_document(pdf.name, file_path)
+    st.sidebar.success("✅ Documents uploaded! Select them below.")
 
-        else:
-            st.warning("⚠ Please enter some Python code to debug.")
+# Sidebar - Select PDFs (Checkbox)
+st.sidebar.header("📑 Select PDFs")
+selected_pdfs = [pdf for pdf in st.session_state.pdf_list if st.sidebar.checkbox(pdf, value=True)]
+
+# Sidebar - Delete PDFs
+st.sidebar.header("🗑️ Remove PDFs")
+delete_pdf = st.sidebar.selectbox("Select PDF to Remove", ["None"] + st.session_state.pdf_list)
+
+if st.sidebar.button("❌ Delete PDF") and delete_pdf != "None":
+    del st.session_state.pdf_vector_stores[delete_pdf]
+    st.session_state.pdf_list.remove(delete_pdf)
+    st.sidebar.success(f"Deleted {delete_pdf}")
+
+# Chatbot Mode Selection
+mode = st.radio("Choose Assistant Mode:", ["Programming Tutor", "Rubber Duck Assistant"])
+
+# Chat Section
+if selected_pdfs:
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    user_query = st.chat_input("Ask a question about programming concepts or debugging...")
+
+    if user_query:
+        st.session_state.messages.append({"role": "user", "content": user_query})
+        with st.chat_message("user"):
+            st.markdown(user_query)
+
+        with st.spinner("🔍 Searching resources..."):
+            relevant_docs = find_context(user_query, selected_pdfs)
+            ai_response = generate_answer(user_query, relevant_docs, mode)
+
+        with st.chat_message("assistant"):
+            st.markdown(ai_response.content)
+            st.session_state.messages.append({"role": "assistant", "content": ai_response.content})
+
+else:
+    st.warning("⚠️ Please upload and select a document to start chatting.")
