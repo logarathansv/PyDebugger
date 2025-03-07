@@ -123,7 +123,7 @@ def process_document(file_name, file_path):
         st.error("Unsupported file format.")
         return
     
-    chunker = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=500)
+    chunker = RecursiveCharacterTextSplitter(chunk_size=200, chunk_overlap=50)
     chunks = chunker.split_documents(docs)
 
     # Create or load a Chroma collection for the PDF
@@ -179,9 +179,17 @@ def generate_follow_up_hint(chat_history, mode):
     response_chain = conversation_prompt | LANGUAGE_MODEL
     return response_chain.invoke({"conversation_context": conversation_context})
 
-# Generate AI Answer
+def get_chunk_size(query, mode):
+    if mode == "Programming Tutor" and len(query) < 50:
+        return 200
+    elif mode == "Rubber Duck Assistant":
+        return 250
+    else:
+        return 300
+
 def generate_answer(query, context_docs, mode):
-    context = "\n\n".join([doc.page_content[:260] for doc in context_docs])  # More context for accuracy
+    chunk_size = get_chunk_size(query, mode)
+    context = "\n\n".join([doc.page_content[:chunk_size] for doc in context_docs])
     print("Context:", context, "\n")
     # Curriculum-based Assistant Prompt
     if mode == "Programming Tutor":
