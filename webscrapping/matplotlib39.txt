@@ -1,0 +1,949 @@
+Matplotlib version 3.9.0
+API Changes...
+API Changes for 3.9.0
+#
+Behaviour Changes
+Deprecations
+Removals
+Development changes
+Behaviour Changes
+#
+plot() shorthand format interprets "Cn" (n>9) as a color-cycle color
+#
+Previously,
+plot(...,
+"-C11")
+would be interpreted as requesting a plot using
+linestyle "-", color "C1" (color #1 of the color cycle), and marker "1" ("tri-down").
+It is now interpreted as requesting linestyle "-" and color "C11" (color #11 of the
+color cycle).
+It is recommended to pass ambiguous markers (such as "1") explicitly using the
+marker
+keyword argument. If the shorthand form is desired, such markers can also be
+unambiguously set by putting them
+before
+the color string.
+Legend labels for
+plot
+#
+Previously if a sequence was passed to the
+label
+parameter of
+plot
+when
+plotting a single dataset, the sequence was automatically cast to string for the legend
+label. Now, if the sequence has only one element, that element will be the legend label.
+To keep the old behavior, cast the sequence to string before passing.
+Boxplots now ignore masked data points
+#
+boxplot
+and
+boxplot_stats
+now ignore any
+masked points in the input data.
+axhspan
+and
+axvspan
+now return
+Rectangle
+s, not
+Polygon
+s
+#
+This change allows using
+axhspan
+to draw an annulus on polar axes.
+This change also affects other elements built via
+axhspan
+and
+axvspan
+,
+such as
+Slider.poly
+.
+Improved handling of pan/zoom events of overlapping Axes
+#
+The forwarding of pan/zoom events is now determined by the visibility of the
+background-patch (e.g.
+ax.patch.get_visible()
+) and by the
+zorder
+of the axes.
+Axes with a visible patch capture the event and do not pass it on to axes below. Only
+the Axes with the highest
+zorder
+that contains the event is triggered (if there
+are multiple Axes with the same
+zorder
+, the last added Axes counts)
+Axes with an invisible patch are also invisible to events and they are passed on to
+the axes below.
+To override the default behavior and explicitly set whether an Axes should forward
+navigation events, use
+Axes.set_forward_navigation_events
+.
+loc='best'
+for
+legend
+now considers
+Text
+and
+PolyCollections
+#
+The location selection
+legend
+now considers the existence of
+Text
+and
+PolyCollections
+in the
+badness
+calculation.
+Note: The
+best
+option can already be quite slow for plots with large amounts of
+data. For
+PolyCollections
+, it only considers the
+Path
+of
+PolyCollections
+and
+not the enclosed area when checking for overlap to reduce additional latency. However,
+it can still be quite slow when there are large amounts of
+PolyCollections
+in the
+plot to check for.
+Exception when not passing a Bbox to BboxTransform*-classes
+#
+The exception when not passing a Bbox to BboxTransform*-classes that expect one, e.g.,
+BboxTransform
+has changed from
+ValueError
+to
+TypeError
+.
+loc
+parameter of
+Cell
+no longer accepts
+None
+#
+The default value of the
+loc
+parameter has been changed from
+None
+to
+right
+,
+which already was the default location. The behavior of
+Cell
+didn't change when
+called without an explicit
+loc
+parameter.
+ContourLabeler.add_label
+now respects
+use_clabeltext
+#
+... and sets
+Text.set_transform_rotates_text
+accordingly.
+Line2D
+#
+When creating a Line2D or using
+Line2D.set_xdata
+and
+Line2D.set_ydata
+,
+passing x/y data as non sequence is now an error.
+ScalarMappable
+s auto-scale their norm when an array is set
+#
+Collections previously deferred auto-scaling of the norm until draw time. This has been
+changed to scale the norm whenever the first array is set to align with the docstring
+and reduce unexpected behavior when accessing the norm before drawing.
+SubplotParams
+moved from
+matplotlib.figure
+to
+matplotlib.gridspec
+#
+It is still importable from
+matplotlib.figure
+, so does not require any changes to
+existing code.
+PowerNorm
+no longer clips values below vmin
+#
+When
+clip=False
+is set (the default) on
+PowerNorm
+, values below
+vmin
+are now linearly normalised. Previously they were clipped to zero. This fixes
+issues with the display of colorbars associated with a power norm.
+Image path semantics of toolmanager-based tools
+#
+Previously, MEP22 ("toolmanager-based") Tools would try to load their icon
+(
+tool.image
+) relative to the current working directory, or, as a fallback, from
+Matplotlib's own image directory. Because both approaches are problematic for
+third-party tools (the end-user may change the current working directory at any time,
+and third-parties cannot add new icons in Matplotlib's image directory), this behavior
+is deprecated; instead,
+tool.image
+is now interpreted relative to the directory
+containing the source file where the
+Tool.image
+class attribute is defined.
+(Defining
+tool.image
+as an absolute path also works and is compatible with both the
+old and the new semantics.)
+Deprecations
+#
+plot_date
+#
+Use of
+plot_date
+has been discouraged since Matplotlib 3.5 and the function is
+now formally deprecated.
+datetime
+-like data should directly be plotted using
+plot
+.
+If you need to plot plain numeric data as
+Matplotlib date format
+or need to set a
+timezone, call
+ax.xaxis.axis_date
+/
+ax.yaxis.axis_date
+before
+plot
+.
+See
+Axis.axis_date
+.
+Legend labels for
+plot
+#
+Previously if a sequence was passed to the
+label
+parameter of
+plot
+when
+plotting a single dataset, the sequence was automatically cast to string for the legend
+label. This behavior is now deprecated and in future will error if the sequence length
+is not one (consistent with multi-dataset behavior, where the number of elements must
+match the number of datasets). To keep the old behavior, cast the sequence to string
+before passing.
+boxplot
+tick labels
+#
+The parameter
+labels
+has been renamed to
+tick_labels
+for clarity and consistency
+with
+bar
+.
+Mixing positional and keyword arguments for
+legend
+handles and labels
+#
+This previously only raised a warning, but is now formally deprecated. If passing
+handles
+and
+labels
+, they must be passed either both positionally or both as keyword.
+Applying theta transforms in
+PolarTransform
+#
+Applying theta transforms in
+PolarTransform
+and
+InvertedPolarTransform
+is deprecated, and will be
+removed in a future version of Matplotlib. This is currently the default behaviour when
+these transforms are used externally, but only takes affect when:
+An axis is associated with the transform.
+The axis has a non-zero theta offset or has theta values increasing in a clockwise
+direction.
+To silence this warning and adopt future behaviour, set
+apply_theta_transforms=False
+. If you need to retain the behaviour where theta values
+are transformed, chain the
+PolarTransform
+with a
+Affine2D
+transform that performs the theta shift and/or sign shift.
+interval
+parameter of
+TimerBase.start
+#
+Setting the timer
+interval
+while starting it is deprecated. The interval can be
+specified instead in the timer constructor, or by setting the
+timer.interval
+attribute.
+nth_coord
+parameter to axisartist helpers for fixed axis
+#
+Helper APIs in
+axisartist
+for generating a "fixed" axis on rectilinear axes
+(
+FixedAxisArtistHelperRectilinear
+) no longer take a
+nth_coord
+parameter, as that
+parameter is entirely inferred from the (required)
+loc
+parameter and having
+inconsistent
+nth_coord
+and
+loc
+is an error.
+For curvilinear axes, the
+nth_coord
+parameter remains supported (it affects the
+ticks
+, not the axis position itself), but that parameter will become keyword-only, for
+consistency with the rectilinear case.
+rcsetup.interactive_bk
+,
+rcsetup.non_interactive_bk
+and
+rcsetup.all_backends
+#
+... are deprecated and replaced by
+matplotlib.backends.backend_registry.list_builtin
+with the following arguments
+matplotlib.backends.BackendFilter.INTERACTIVE
+matplotlib.backends.BackendFilter.NON_INTERACTIVE
+None
+respectively.
+Miscellaneous deprecations
+#
+backend_ps.get_bbox_header
+is considered an internal helper
+BboxTransformToMaxOnly
+; if you rely on this, please make a copy of the code
+ContourLabeler.add_label_clabeltext
+TransformNode.is_bbox
+; instead check the object using
+isinstance(...,
+BboxBase)
+GridHelperCurveLinear.get_tick_iterator
+Removals
+#
+Top-level cmap registration and access functions in
+mpl.cm
+#
+As part of the
+multi-step refactoring of colormap registration
+, the following functions have
+been removed:
+matplotlib.cm.get_cmap
+; use
+matplotlib.colormaps[name]
+instead if you have a
+str
+.
+Use
+matplotlib.cm.ColormapRegistry.get_cmap
+if you have a
+str
+,
+None
+or a
+matplotlib.colors.Colormap
+object that you want to convert to a
+Colormap
+object.
+matplotlib.cm.register_cmap
+; use
+matplotlib.colormaps.register
+instead.
+matplotlib.cm.unregister_cmap
+; use
+matplotlib.colormaps.unregister
+instead.
+matplotlib.pyplot.register_cmap
+; use
+matplotlib.colormaps.register
+instead.
+The
+matplotlib.pyplot.get_cmap
+function will stay available for backward
+compatibility.
+Contour labels
+#
+contour.ClabelText
+and
+ContourLabeler.set_label_props
+are removed. Use
+Text(...,
+transform_rotates_text=True)
+as a replacement for
+contour.ClabelText(...)
+and
+text.set(text=text,
+color=color,
+fontproperties=labeler.labelFontProps,
+clip_box=labeler.axes.bbox)
+as a replacement
+for the
+ContourLabeler.set_label_props(label,
+text,
+color)
+.
+The
+labelFontProps
+,
+labelFontSizeList
+, and
+labelTextsList
+attributes of
+ContourLabeler
+have been removed.  Use the
+labelTexts
+attribute and the font
+properties of the corresponding text objects instead.
+num2julian
+,
+julian2num
+and
+JULIAN_OFFSET
+#
+... of the
+dates
+module are removed without replacements. These were undocumented and
+not exported.
+Julian dates in Matplotlib were calculated from a Julian date epoch:
+jdate
+=
+(date
+-
+np.datetime64(EPOCH))
+/
+np.timedelta64(1,
+'D')
+.  Conversely, a Julian date was
+converted to datetime as
+date
+=
+np.timedelta64(int(jdate
+*
+24
+*
+3600),
+'s')
++
+np.datetime64(EPOCH)
+. Matplotlib was using
+EPOCH='-4713-11-24T12:00'
+so that
+2000-01-01 at 12:00 is 2_451_545.0 (see
+https://en.wikipedia.org/wiki/Julian_day
+).
+offsetbox
+methods
+#
+offsetbox.bbox_artist
+is removed. This was just a wrapper to call
+patches.bbox_artist
+if a flag is set in the file, so use that directly if you need
+the behavior.
+OffsetBox.get_extent_offsets
+and
+OffsetBox.get_extent
+are removed; these methods
+are also removed on all subclasses of
+OffsetBox
+. To get the offsetbox extents,
+instead of
+get_extent
+, use
+OffsetBox.get_bbox
+, which directly returns a
+Bbox
+instance. To also get the child offsets, instead of
+get_extent_offsets
+, separately
+call
+get_offset
+on each children after triggering a draw.
+parse_fontconfig_pattern
+raises on unknown constant names
+#
+Previously, in a fontconfig pattern like
+DejaVu
+Sans:foo
+, the unknown
+foo
+constant name would be silently ignored.  This now raises an error.
+tri
+submodules
+#
+The
+matplotlib.tri.*
+submodules are removed.  All functionality is available in
+matplotlib.tri
+directly and should be imported from there.
+Widget API
+#
+CheckButtons.rectangles
+and
+CheckButtons.lines
+are removed;
+CheckButtons
+now draws itself using
+scatter
+.
+RadioButtons.circles
+is removed;
+RadioButtons
+now draws itself using
+scatter
+.
+MultiCursor.needclear
+is removed with no replacement.
+The unused parameter
+x
+to
+TextBox.begin_typing
+was a required argument, and is
+now removed.
+Most arguments to widgets have been made keyword-only
+#
+Passing all but the very few first arguments positionally in the constructors of Widgets
+is now keyword-only. In general, all optional arguments are keyword-only.
+Axes3D
+API
+#
+Axes3D.unit_cube
+,
+Axes3D.tunit_cube
+, and
+Axes3D.tunit_edges
+are removed
+without replacement.
+axes3d.vvec
+,
+axes3d.eye
+,
+axes3d.sx
+, and
+axes3d.sy
+are removed without
+replacement.
+Inconsistent
+nth_coord
+and
+loc
+passed to
+_FixedAxisArtistHelperBase
+#
+The value of the
+nth_coord
+parameter of
+_FixedAxisArtistHelperBase
+and its
+subclasses is now inferred from the value of
+loc
+; passing inconsistent values (e.g.,
+requesting a "top y axis" or a "left x axis") has no more effect.
+Passing undefined
+label_mode
+to
+Grid
+#
+... is no longer allowed. This includes
+mpl_toolkits.axes_grid1.axes_grid.Grid
+,
+mpl_toolkits.axes_grid1.axes_grid.AxesGrid
+, and
+mpl_toolkits.axes_grid1.axes_grid.ImageGrid
+as well as the corresponding classes
+imported from
+mpl_toolkits.axisartist.axes_grid
+.
+Pass
+label_mode='keep'
+instead to get the previous behavior of not modifying labels.
+draw_gouraud_triangle
+#
+... is removed. Use
+draw_gouraud_triangles
+instead.
+A
+draw_gouraud_triangle
+call in a custom
+Artist
+can readily be
+replaced as:
+self
+.
+draw_gouraud_triangles
+(
+gc
+,
+points
+.
+reshape
+((
+1
+,
+3
+,
+2
+)),
+colors
+.
+reshape
+((
+1
+,
+3
+,
+4
+)),
+trans
+)
+A
+draw_gouraud_triangles
+method can be implemented from an
+existing
+draw_gouraud_triangle
+method as:
+transform
+=
+transform
+.
+frozen
+()
+for
+tri
+,
+col
+in
+zip
+(
+triangles_array
+,
+colors_array
+):
+self
+.
+draw_gouraud_triangle
+(
+gc
+,
+tri
+,
+col
+,
+transform
+)
+Miscellaneous removals
+#
+The following items have previously been replaced, and are now removed:
+ticklabels
+parameter of
+matplotlib.axis.Axis.set_ticklabels
+has been renamed to
+labels
+.
+Barbs.barbs_doc
+and
+Quiver.quiver_doc
+are removed. These are the doc-strings
+and should not be accessible as a named class member, but as normal doc-strings would.
+collections.PolyCollection.span_where
+and
+collections.BrokenBarHCollection
+;
+use
+fill_between
+instead.
+Legend.legendHandles
+was undocumented and has been renamed to
+legend_handles
+.
+The following items have been removed without replacements:
+The attributes
+repeat
+of
+TimedAnimation
+and subclasses and
+save_count
+of
+FuncAnimation
+are considered private and removed.
+matplotlib.backend.backend_agg.BufferRegion.to_string
+matplotlib.backend.backend_agg.BufferRegion.to_string_argb
+matplotlib.backends.backend_ps.PsBackendHelper
+matplotlib.backends.backend_webagg.ServerThread
+raw
+parameter of
+GridSpecBase.get_grid_positions
+matplotlib.patches.ConnectionStyle._Base.SimpleEvent
+passthru_pt
+attribute of
+mpl_toolkits.axisartist.AxisArtistHelper
+Development changes
+#
+Build system ported to Meson
+#
+The build system of Matplotlib has been ported from setuptools to
+meson-python
+and
+Meson
+.
+Consequently, there have been a few changes for development and packaging purposes.
+Installation by
+pip
+of packages with
+pyproject.toml
+use
+build isolation
+by default, which interferes with editable installation. Thus for developers using
+editable installs, it is now necessary to pass the
+--no-build-isolation
+flag to
+pip
+install
+. This means that all build-time requirements must be available in the
+environment for an editable install.
+Build configuration has moved from a custom
+mplsetup.cfg
+(also configurable
+via
+MPLSETUP
+environment variable) to Meson options. These may be specified using
+meson-python's build config settings
+for
+setup-args
+. See
+meson_options.txt
+for all options. For example, a
+mplsetup.cfg
+containing the following:
+[
+rc_options
+]
+backend
+=
+Agg
+[
+libs
+]
+system_qhull
+=
+True
+may be replaced by passing the following arguments to
+pip
+:
+--
+config
+-
+settings
+=
+setup
+-
+args
+=
+"-DrcParams-backend=Agg"
+--
+config
+-
+settings
+=
+setup
+-
+args
+=
+"-Dsystem-qhull=true"
+Note that you must use
+pip
+>= 23.1 in order to pass more than one setting.
+Relatedly, Meson's
+builtin options
+are now used instead of custom options, e.g., the LTO option is now
+b_lto
+.
+On Windows, Meson activates a Visual Studio environment automatically. However, it
+will not do so if another compiler is available. See
+Meson's documentation
+if you wish to
+change the priority of chosen compilers.
+Installation of test data was previously controlled by
+mplsetup.cfg
+, but has
+now been moved to Meson's install tags. To install test data, add the
+tests
+tag
+to the requested install (be sure to include the existing tags as below):
+--
+config
+-
+settings
+=
+install
+-
+args
+=
+"--tags=data,python-runtime,runtime,tests"
+Checking typing stubs with
+stubtest
+does not work easily with editable install.
+For the time being, we suggest using a normal (non-editable) install if you wish to
+run
+stubtest
+.
+Increase to minimum supported versions of dependencies
+#
+For Matplotlib 3.9, the
+minimum supported versions
+are being
+bumped:
+Dependency
+min in mpl3.8
+min in mpl3.9
+NumPy
+1.21.0
+1.23.0
+setuptools
+42
+64
+This is consistent with our
+Dependency version policy
+and
+SPEC 0
+.
+To comply with requirements of
+setuptools_scm
+, the minimum version of
+setuptools
+has been increased from 42 to 64.
+Extensions require C++17
+#
+Matplotlib now requires a compiler that supports C++17 in order to build its extensions.
+According to
+SciPy's analysis
+, this
+should be available on all supported platforms.
+Windows on ARM64 support
+#
+Windows on ARM64 now bundles FreeType 2.6.1 instead of 2.11.1 when building from source.
+This may cause small changes to text rendering, but should become consistent with all
+other platforms.
+On this page
+Behaviour Changes
+plot() shorthand format interprets "Cn" (n>9) as a color-cycle color
+Legend labels for
+plot
+Boxplots now ignore masked data points
+axhspan
+and
+axvspan
+now return
+Rectangle
+s, not
+Polygon
+s
+Improved handling of pan/zoom events of overlapping Axes
+loc='best'
+for
+legend
+now considers
+Text
+and
+PolyCollections
+Exception when not passing a Bbox to BboxTransform*-classes
+loc
+parameter of
+Cell
+no longer accepts
+None
+ContourLabeler.add_label
+now respects
+use_clabeltext
+Line2D
+ScalarMappable
+s auto-scale their norm when an array is set
+SubplotParams
+moved from
+matplotlib.figure
+to
+matplotlib.gridspec
+PowerNorm
+no longer clips values below vmin
+Image path semantics of toolmanager-based tools
+Deprecations
+plot_date
+Legend labels for
+plot
+boxplot
+tick labels
+Mixing positional and keyword arguments for
+legend
+handles and labels
+Applying theta transforms in
+PolarTransform
+interval
+parameter of
+TimerBase.start
+nth_coord
+parameter to axisartist helpers for fixed axis
+rcsetup.interactive_bk
+,
+rcsetup.non_interactive_bk
+and
+rcsetup.all_backends
+Miscellaneous deprecations
+Removals
+Top-level cmap registration and access functions in
+mpl.cm
+Contour labels
+num2julian
+,
+julian2num
+and
+JULIAN_OFFSET
+offsetbox
+methods
+parse_fontconfig_pattern
+raises on unknown constant names
+tri
+submodules
+Widget API
+Most arguments to widgets have been made keyword-only
+Axes3D
+API
+Inconsistent
+nth_coord
+and
+loc
+passed to
+_FixedAxisArtistHelperBase
+Passing undefined
+label_mode
+to
+Grid
+draw_gouraud_triangle
+Miscellaneous removals
+Development changes
+Build system ported to Meson
+Increase to minimum supported versions of dependencies
+Extensions require C++17
+Windows on ARM64 support
+

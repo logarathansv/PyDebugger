@@ -1,4 +1,5 @@
 import os
+from langchain.schema import Document
 from openai import BadRequestError
 import streamlit as st
 from langchain_community.document_loaders import PDFPlumberLoader
@@ -9,6 +10,7 @@ from dotenv import load_dotenv
 from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
 import time
 import json
+from pptx import Presentation
 
 # Load environment variables
 load_dotenv()
@@ -89,6 +91,14 @@ for pdf_name in st.session_state.pdf_list:
     )
     st.session_state.pdf_vector_stores[pdf_name] = vector_store
 
+def extract_text_from_txt(file_path):
+    with open(file_path, "r", encoding="utf-8") as f:
+        return f.read()
+
+def extract_text_from_pptx(file_path):
+    presentation = Presentation(file_path)
+    return "\n".join([shape.text for slide in presentation.slides for shape in slide.shapes if hasattr(shape, "text")])
+
 # Save PDF
 def save_uploaded_file(uploaded_file):
     file_path = os.path.join(PDF_STORAGE_PATH, uploaded_file.name)
@@ -98,8 +108,21 @@ def save_uploaded_file(uploaded_file):
 
 # Process PDF
 def process_document(file_name, file_path):
-    loader = PDFPlumberLoader(file_path)
-    docs = loader.load()
+    file_ext = file_name.split(".")[-1].lower()
+    
+    if file_ext == "pdf":
+        loader = PDFPlumberLoader(file_path)
+        docs = loader.load()
+    elif file_ext == "txt":
+        text = extract_text_from_txt(file_path)
+        docs = [Document(page_content=text)] 
+    elif file_ext == "pptx":
+        text = extract_text_from_pptx(file_path)
+        docs = [Document(page_content=text)] 
+    else:
+        st.error("Unsupported file format.")
+        return
+    
     chunker = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=500)
     chunks = chunker.split_documents(docs)
 
@@ -158,8 +181,8 @@ def generate_follow_up_hint(chat_history, mode):
 
 # Generate AI Answer
 def generate_answer(query, context_docs, mode):
-    context = "\n\n".join([doc.page_content[:50] for doc in context_docs])  # More context for accuracy
-
+    context = "\n\n".join([doc.page_content[:260] for doc in context_docs])  # More context for accuracy
+    print("Context:", context, "\n")
     # Curriculum-based Assistant Prompt
     if mode == "Programming Tutor":
         prompt = """
@@ -189,20 +212,20 @@ def generate_answer(query, context_docs, mode):
     conversation_prompt = ChatPromptTemplate.from_template(prompt)
     response_chain = conversation_prompt | LANGUAGE_MODEL
 
-    time.sleep(20)
+    # time.sleep(20)
     return response_chain.invoke({"query": query, "context": context})
 
 # UI Header
-st.title("💡 Curriculum-Based Programming Chatbot & Debugging Assistant")
+st.title("💡 Learning Chatbot & Debugging Assistant")
 st.markdown("---")
 
 # Sidebar - Upload PDFs
 st.sidebar.header("📤 Upload Programming Resources")
-uploaded_pdfs = st.sidebar.file_uploader("Upload PDFs (Textbooks, Docs, etc.)", type="pdf", accept_multiple_files=True)
+uploaded_files = st.sidebar.file_uploader("Upload PDF, TXT, PPTX", type=["pdf", "txt", "pptx"], accept_multiple_files=True)
 
 # Process New PDFs
-if uploaded_pdfs:
-    for pdf in uploaded_pdfs:
+if uploaded_files:
+    for pdf in uploaded_files:
         if pdf.name not in st.session_state.pdf_vector_stores:
             file_path = save_uploaded_file(pdf)
             process_document(pdf.name, file_path)
@@ -257,7 +280,7 @@ if selected_pdfs:
             st.session_state.messages.append({"role": "assistant", "content": ai_response.content})
 
     # Add "Need another hint" button
-    if st.session_state.messages and st.session_state.messages[-1]["role"] == "assistant":
+    if mode == "Rubber Duck Assistant" and st.session_state.messages and st.session_state.messages[-1]["role"] == "assistant":
         if st.button("Need another hint"):
             # Generate a follow-up hint based on the conversation context
             with st.spinner("🤔 Generating another hint..."):
