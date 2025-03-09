@@ -38,7 +38,7 @@ LANGUAGE_MODEL = AzureChatOpenAI(
     openai_api_version="2025-01-01-preview",
     deployment_name=AZURE_DEPLOYMENT_NAME,
     openai_api_key=AZURE_OPENAI_KEY,
-    temperature=0.2
+    temperature=0.3
 )
 
 # Dark Mode UI
@@ -123,7 +123,7 @@ def process_document(file_name, file_path):
         st.error("Unsupported file format.")
         return
     
-    chunker = RecursiveCharacterTextSplitter(chunk_size=200, chunk_overlap=50)
+    chunker = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
     chunks = chunker.split_documents(docs)
 
     # Create or load a Chroma collection for the PDF
@@ -181,11 +181,11 @@ def generate_follow_up_hint(chat_history, mode):
 
 def get_chunk_size(query, mode):
     if mode == "Programming Tutor" and len(query) < 50:
-        return 200
-    elif mode == "Rubber Duck Assistant":
         return 250
+    elif mode == "Rubber Duck Assistant":
+        return 150
     else:
-        return 300
+        return 250
 
 def generate_answer(query, context_docs, mode):
     chunk_size = get_chunk_size(query, mode)
@@ -240,14 +240,14 @@ if uploaded_files:
     st.sidebar.success("✅ Documents uploaded! Select them below.")
 
 # Sidebar - Select PDFs (Checkbox)
-st.sidebar.header("📑 Select PDFs")
+st.sidebar.header("📑 Select Files")
 selected_pdfs = [pdf for pdf in st.session_state.pdf_list if st.sidebar.checkbox(pdf, value=True)]
 
-# Sidebar - Delete PDFs
-st.sidebar.header("🗑️ Remove PDFs")
+# Sidebar - Delete Files
+st.sidebar.header("🗑️ Remove Files")
 delete_pdf = st.sidebar.selectbox("Select PDF to Remove", ["None"] + st.session_state.pdf_list)
 
-if st.sidebar.button("❌ Delete PDF") and delete_pdf != "None":
+if st.sidebar.button("❌ Delete Files") and delete_pdf != "None":
     # Delete the Chroma collection for the PDF
     vector_store = st.session_state.pdf_vector_stores.get(delete_pdf)
     if vector_store:

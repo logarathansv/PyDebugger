@@ -129,39 +129,9 @@ The interpreter now uses color by default when displaying tracebacks in the term
 
 A common mistake is to write a script with the same name as a standard library module. When this results in errors, we now display a more helpful error message:
 
-$ python random.py
-Traceback (most recent call last):
-  File "/home/me/random.py", line 1, in <module>
-    import random
-  File "/home/me/random.py", line 3, in <module>
-    print(random.randint(5))
-          ^^^^^^^^^^^^^^
-AttributeError: module 'random' has no attribute 'randint' (consider renaming '/home/me/random.py' since it has the same name as the standard library module named 'random' and prevents importing that standard library module)
-Similarly, if a script has the same name as a third-party module that it attempts to import and this results in errors, we also display a more helpful error message:
-
-$ python numpy.py
-Traceback (most recent call last):
-  File "/home/me/numpy.py", line 1, in <module>
-    import numpy as np
-  File "/home/me/numpy.py", line 3, in <module>
-    np.array([1, 2, 3])
-    ^^^^^^^^
-AttributeError: module 'numpy' has no attribute 'array' (consider renaming '/home/me/numpy.py' if it has the same name as a library you intended to import)
-(Contributed by Shantanu Jain in gh-95754.)
-
 The error message now tries to suggest the correct keyword argument when an incorrect keyword argument is passed to a function.
 
->>>
-"Better error messages!".split(max_split=1)
-Traceback (most recent call last):
-  File "<python-input-0>", line 1, in <module>
-    "Better error messages!".split(max_split=1)
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
-TypeError: split() got an unexpected keyword argument 'max_split'. Did you mean 'maxsplit'?
-(Contributed by Pablo Galindo Salgado and Shantanu Jain in gh-107944.)
-
-Free-threaded CPython
-CPython now has experimental support for running in a free-threaded mode, with the global interpreter lock (GIL) disabled. This is an experimental feature and therefore is not enabled by default. The free-threaded mode requires a different executable, usually called python3.13t or python3.13t.exe. Pre-built binaries marked as free-threaded can be installed as part of the official Windows and macOS installers, or CPython can be built from source with the --disable-gil option.
+ now has experimental support for running in a free-threaded mode, with the global interpreter lock (GIL) disabled. This is an experimental feature and therefore is not enabled by default. The free-threaded mode requires a different executable, usually called python3.13t or python3.13t.exe. Pre-built binaries marked as free-threaded can be installed as part of the official Windows and macOS installers, or CPython can be built from source with the --disable-gil option.
 
 Free-threaded execution allows for full utilization of the available processing power by running threads in parallel on available CPU cores. While not all software will benefit from this automatically, programs designed with threading in mind will run faster on multi-core hardware. The free-threaded mode is experimental and work is ongoing to improve it: expect some bugs and a substantial single-threaded performance hit. Free-threaded builds of CPython support optionally running with the GIL enabled at runtime using the environment variable PYTHON_GIL or the command-line option -X gil=1.
 
