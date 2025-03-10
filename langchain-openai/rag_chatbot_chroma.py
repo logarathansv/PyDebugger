@@ -300,9 +300,10 @@ def generate_answer(query, context_docs, citations, mode):
         You are an expert Rubber Duck Python debugging assistant. Analyze the following Python code and provide debugging hints **one at a time**.
         Do NOT give the full solution immediately.
         Each response should include:
-        1️⃣ The next step in debugging.
-        2️⃣ A short explanation.
-        3️⃣ if the user wants another hint, give it unless it's obvious.
+        1️- The next step in debugging.
+        2️- A short explanation.
+        3-if the user wants another hint, give it unless it's obvious.
+        4- specify the line number if needed.
         
         Query: {query}
         Context: {context}
