@@ -3,8 +3,8 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
 # Define the target website (Replace with your target URL)
-URL = "https://www.tensorflow.org/api_docs/python/tf"
-OUTPUT_FILE = "tensorflow.txt"
+URL = "https://numpy.org/doc/stable/release/2.2.0-notes.html"
+OUTPUT_FILE = "numpy2d2.txt"
 
 def scrape_page(url):
     """Scrapes a single webpage and returns its text content and valid links."""
@@ -14,17 +14,23 @@ def scrape_page(url):
         return "", []
     
     soup = BeautifulSoup(response.text, "html.parser")
-    article_content = soup.find("div", class_="devsite-article-body clearfix")
+    article_content = soup.find("article", class_="bd-article")
     
     if not article_content:
         print(f"Article section not found in {url}")
         return "", []
     
-    content_text = " ".join(article_content.stripped_strings)  # Join text into a single line
-    
-    # Extract valid links (exclude those with #, which are same-page anchors)
-    links = [urljoin(url, a_tag["href"]) for a_tag in article_content.find_all("a", href=True) if not a_tag["href"].startswith("#")]
-    
+    content_text = " ".join(article_content.stripped_strings)
+    links = []
+    for a_tag in article_content.find_all("a", href=True):
+        link = a_tag["href"]
+        
+        if link.startswith("#") or "pull" in link or "github.com" in link:
+            continue  # Skip unwanted links
+
+        full_link = urljoin(url, link)  # Ensure absolute URL
+        if full_link.startswith("https"):
+            links.append(full_link)
     return content_text, links
 
 def scrape_website(url):

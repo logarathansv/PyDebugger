@@ -179,7 +179,7 @@ def process_document(file_name, file_path):
         st.error("Unsupported file format.")
         return
     
-    chunker = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+    chunker = RecursiveCharacterTextSplitter(chunk_size=200, chunk_overlap=50)
     chunks = chunker.split_documents(docs)
 
     # Create or load a Chroma collection for the PDF
@@ -205,18 +205,32 @@ def process_document(file_name, file_path):
 #             context_docs.extend(store.similarity_search(query))
 #     return context_docs
 
-def find_context(query, selected_pdfs):
+def find_context(query, selected_pdfs, threshold=0.7, max_results=5):
     context_docs = []
     citations = []
-    
+
     for pdf in selected_pdfs:
         store = st.session_state.pdf_vector_stores.get(pdf)
+        
         if store:
-            docs = store.similarity_search(query)
-            context_docs.extend(docs)
-            citations.extend([(pdf, doc.metadata.get("page", "Unknown")) for doc in docs])
+            results = store.similarity_search_with_score(query)  # Get scores
+            
+            # Filter out low-confidence matches
+            filtered_results = [(doc, score) for doc, score in results if score >= threshold]
+            
+            # Sort by highest similarity score
+            filtered_results.sort(key=lambda x: x[1], reverse=True)
+            
+            # Select top results
+            top_results = filtered_results[:max_results]
+            
+            # Extract documents & citations
+            for doc, score in top_results:
+                context_docs.append(doc)
+                citations.append((pdf, doc.metadata.get("page", "Unknown"), round(score, 2)))  # Include score
 
     return context_docs, citations
+
 
 def generate_follow_up_hint(chat_history, mode):
     # Extract the conversation context
@@ -250,11 +264,11 @@ def generate_follow_up_hint(chat_history, mode):
 
 def get_chunk_size(query, mode):
     if mode == "Programming Tutor" and len(query) < 50:
-        return 250
+        return 100
     elif mode == "Rubber Duck Assistant":
         return 150
     else:
-        return 250
+        return 100
 # def generate_answer(query, context_docs, citations, mode):
 #     chunk_size = get_chunk_size(query, mode)
 #     context = "\n\n".join([doc.page_content[:chunk_size] for doc in context_docs])
@@ -313,13 +327,18 @@ def generate_answer(query, context_docs, citations, mode):
     conversation_prompt = ChatPromptTemplate.from_template(prompt)
     response_chain = conversation_prompt | LANGUAGE_MODEL
     answer = response_chain.invoke({"query": query, "context": context})
-    cited=""
+    cited = ""
+    cited_pdfs = set()  # Use a set to store unique citations
+
+    for pdf in citations:
+        cited_pdfs.add(f"- {pdf[0]}")  # Add citation as a formatted string
+
     # Append citations
-    if citations:
-        sources = "\n".join([f"- {pdf} (Page {page})" for pdf, page in citations])
+    if cited_pdfs:
+        sources = "\n".join(sorted(cited_pdfs))  # Sort to maintain order if needed
         cited += f"\n\n**Sources:**\n{sources}"
 
-    # time.sleep(20)
+        # time.sleep(20)
     return answer,cited
 
 # UI Header
@@ -424,7 +443,8 @@ if selected_pdfs:
         with st.chat_message("assistant"):
             st.markdown(ai_response.content)
             st.markdown(cited)
-            st.session_state.messages.append({"role": "assistant", "content": ai_response})
+            st.session_state.messages.append({"role": "assistant", "content": ai_response.content})
+            st.session_state.messages.append({"role": "assistant", "content": cited})
 
     # Add "Need another hint" button
     if mode == "Rubber Duck Assistant" and st.session_state.messages and st.session_state.messages[-1]["role"] == "assistant":
