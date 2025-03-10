@@ -10,7 +10,9 @@ from dotenv import load_dotenv
 from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
 import time
 import json
+from youtube_transcript_api import YouTubeTranscriptApi
 from pptx import Presentation
+from urllib.parse import urlparse, parse_qs
 
 # Load environment variables
 load_dotenv()
@@ -195,13 +197,26 @@ def process_document(file_name, file_path):
         save_pdf_list(st.session_state.pdf_list)  # Save updated PDF list to disk
 
 # Search Relevant Docs
+# def find_context(query, selected_pdfs):
+#     context_docs = []
+#     for pdf in selected_pdfs:
+#         store = st.session_state.pdf_vector_stores.get(pdf)
+#         if store:
+#             context_docs.extend(store.similarity_search(query))
+#     return context_docs
+
 def find_context(query, selected_pdfs):
     context_docs = []
+    citations = []
+    
     for pdf in selected_pdfs:
         store = st.session_state.pdf_vector_stores.get(pdf)
         if store:
-            context_docs.extend(store.similarity_search(query))
-    return context_docs
+            docs = store.similarity_search(query)
+            context_docs.extend(docs)
+            citations.extend([(pdf, doc.metadata.get("page", "Unknown")) for doc in docs])
+
+    return context_docs, citations
 
 def generate_follow_up_hint(chat_history, mode):
     # Extract the conversation context
@@ -240,8 +255,31 @@ def get_chunk_size(query, mode):
         return 150
     else:
         return 250
+# def generate_answer(query, context_docs, citations, mode):
+#     chunk_size = get_chunk_size(query, mode)
+#     context = "\n\n".join([doc.page_content[:chunk_size] for doc in context_docs])
 
-def generate_answer(query, context_docs, mode):
+#     prompt = """
+#     You are an AI assistant that provides answers with reliable sources.
+#     Use the context below to generate an accurate response.
+    
+#     Query: {query}
+#     Context: {context}
+#     Answer:
+#     """
+    
+#     conversation_prompt = ChatPromptTemplate.from_template(prompt)
+#     response_chain = conversation_prompt | LANGUAGE_MODEL
+#     answer = response_chain.invoke({"query": query, "context": context})
+
+#     # Append citations
+#     if citations:
+#         sources = "\n".join([f"- {pdf} (Page {page})" for pdf, page in citations])
+#         answer += f"\n\n**Sources:**\n{sources}"
+
+#     return answer
+
+def generate_answer(query, context_docs, citations, mode):
     chunk_size = get_chunk_size(query, mode)
     context = "\n\n".join([doc.page_content[:chunk_size] for doc in context_docs])
     print("Context:", context, "\n")
@@ -273,9 +311,15 @@ def generate_answer(query, context_docs, mode):
 
     conversation_prompt = ChatPromptTemplate.from_template(prompt)
     response_chain = conversation_prompt | LANGUAGE_MODEL
+    answer = response_chain.invoke({"query": query, "context": context})
+    cited=""
+    # Append citations
+    if citations:
+        sources = "\n".join([f"- {pdf} (Page {page})" for pdf, page in citations])
+        cited += f"\n\n**Sources:**\n{sources}"
 
     # time.sleep(20)
-    return response_chain.invoke({"query": query, "context": context})
+    return answer,cited
 
 # UI Header
 st.title("💡 Learning Chatbot & Debugging Assistant")
@@ -369,16 +413,17 @@ if selected_pdfs:
 
         # Generate AI response
         with st.spinner("🔍 Searching resources..."):
-            relevant_docs = find_context(user_query, selected_pdfs)
+            relevant_docs, citations = find_context(user_query, selected_pdfs)
             try:
-                ai_response = generate_answer(user_query, relevant_docs, mode)
+                ai_response,cited = generate_answer(user_query, relevant_docs,citations, mode)
             except BadRequestError as e:
                 ai_response = "Sorry, I cannot provide a response to that query due to content filtering policies. Please rephrase your question."
 
         # Add AI response to chat history
         with st.chat_message("assistant"):
             st.markdown(ai_response.content)
-            st.session_state.messages.append({"role": "assistant", "content": ai_response.content})
+            st.markdown(cited)
+            st.session_state.messages.append({"role": "assistant", "content": ai_response})
 
     # Add "Need another hint" button
     if mode == "Rubber Duck Assistant" and st.session_state.messages and st.session_state.messages[-1]["role"] == "assistant":
