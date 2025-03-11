@@ -336,15 +336,13 @@ def generate_answer(query, context_docs, citations, mode):
         sources = "\n".join(sorted(cited_pdfs))  # Sort to maintain order if needed
         cited += f"\n\n**Sources:**\n{sources}"
 
-        # time.sleep(20)
+    #time.sleep(20)
     return answer,cited
 
-# UI Header
-st.title("💡 Learning Chatbot & Debugging Assistant")
-st.markdown("---")
 
-# Sidebar - Upload PDFs
-st.sidebar.header("📤 Upload Programming Resources")
+st.title("Learning Chatbot & Debugging Assistant")
+st.markdown("---")
+st.sidebar.header("Upload Programming Resources")
 uploaded_files = st.sidebar.file_uploader("Upload PDF, TXT, PPTX", type=["pdf", "txt", "pptx"], accept_multiple_files=True)
 
 # Process New PDFs
@@ -353,56 +351,48 @@ if uploaded_files:
         if pdf.name not in st.session_state.pdf_vector_stores:
             file_path = save_uploaded_file(pdf)
             process_document(pdf.name, file_path)
-    st.sidebar.success("✅ Documents uploaded! Select them below.")
+    st.sidebar.success("Documents uploaded! Select them below.")
 
-st.sidebar.header("📹 YouTube Transcript Extractor")
+st.sidebar.header("YouTube Transcript Extractor")
 st.sidebar.caption("Paste a YouTube link to extract and save the transcript.")
-
-# Input field for YouTube link
 video_url = st.sidebar.text_input("🔗 Paste YouTube link here:")
 
-if st.sidebar.button("🎬 Get Transcript"):
+if st.sidebar.button("Get Transcript"):
     if video_url:
         try:
             # Extract Video ID
             video_id = extract_video_id(video_url)
             if not video_id:
-                st.error("❌ Invalid YouTube URL. Please check and try again.")
+                st.error("Invalid YouTube URL. Please check and try again.")
                 st.stop()
-
-            # Generate video name
             video_name = f"transcript_{video_id}"
-
-            # Extract transcript
             file_path, transcript_text = get_english_transcript(video_id, video_name)
-
             if file_path:
                 # Update PDF list
                 pdf_list = load_pdf_list()
                 if video_name not in pdf_list:
                     pdf_list.append(video_name)
                     save_pdf_list(pdf_list)
-
-                st.sidebar.success(f"✅ Transcript saved as: {video_name}.txt")
+                st.sidebar.success(f"Transcript saved as: {video_name}.txt")
                 st.rerun()
             else:
-                st.error(transcript_text)
+                st.sidebar.error(transcript_text)
 
         except Exception as e:
-            st.sidebar.error(f"❌ Error: {e}")
+            st.sidebar.error(f"Error: {e}")
 
     else:
         st.warning("⚠ Please enter a valid YouTube link.")
 
 # Sidebar - Select PDFs (Checkbox)
-st.sidebar.header("📑 Select Files")
+st.sidebar.header("Select Files")
 selected_pdfs = [pdf for pdf in st.session_state.pdf_list if st.sidebar.checkbox(pdf, value=True)]
 
 # Sidebar - Delete Files
-st.sidebar.header("🗑️ Remove Files")
+st.sidebar.header("Remove Files")
 delete_pdf = st.sidebar.selectbox("Select PDF to Remove", ["None"] + st.session_state.pdf_list)
 
-if st.sidebar.button("❌ Delete Files") and delete_pdf != "None":
+if st.sidebar.button("Delete Files") and delete_pdf != "None":
     # Delete the Chroma collection for the PDF
     vector_store = st.session_state.pdf_vector_stores.get(delete_pdf)
     if vector_store:
@@ -452,8 +442,7 @@ if selected_pdfs:
                 try:
                     follow_up_response = generate_follow_up_hint(st.session_state.messages, mode)
                 except BadRequestError as e:
-                    follow_up_response = "Sorry, I cannot provide a response to that query due to content filtering policies. Please rephrase your question."
-                with st.chat_message("assistant"):
+                    follow_up_response = "Sorry, I cannot provide a response to that query."
                     st.markdown(follow_up_response.content)
                     st.session_state.messages.append({"role": "assistant", "content": follow_up_response.content})
 else:
