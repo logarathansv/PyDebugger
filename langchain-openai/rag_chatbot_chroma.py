@@ -1,4 +1,3 @@
-import os
 from langchain.schema import Document
 from openai import BadRequestError
 import streamlit as st
@@ -8,11 +7,12 @@ from langchain_community.vectorstores import Chroma
 from langchain_core.prompts import ChatPromptTemplate
 from dotenv import load_dotenv
 from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
-import time
-import json
 from youtube_transcript_api import YouTubeTranscriptApi
 from pptx import Presentation
 from urllib.parse import urlparse, parse_qs
+import time
+import json
+import os
 
 # Load environment variables
 load_dotenv()
@@ -55,7 +55,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # System Config
-PDF_STORAGE_PATH = 'document_store/pdfs/'
+PDF_STORAGE_PATH = 'document_store/files/'
 CHROMA_DB_PATH = 'chroma_db/'
 PDF_LIST_PATH = os.path.join(CHROMA_DB_PATH, "pdf_list.json")
 
@@ -82,8 +82,6 @@ def extract_video_id(url):
     
     if parsed_url.netloc in ["www.youtube.com", "youtube.com", "m.youtube.com"]:
         video_id = parse_qs(parsed_url.query).get("v", [None])[0]
-    elif parsed_url.netloc in ["youtu.be"]:  # Shortened URL format
-        video_id = parsed_url.path.lstrip("/")
 
     return video_id
 
