@@ -13,8 +13,8 @@ lemmatizer = WordNetLemmatizer()
 stop_words = set(stopwords.words("english"))
 
 # Step 1: Read Input Text File
-input_file = "../numpy2d2.txt"
-output_file = "../numpyprocessed.txt"
+input_file = "../langchain.txt"
+output_file = "../langchain_processed.txt"
 
 with open(input_file, "r", encoding="utf-8") as file:
     raw_data = file.readlines()

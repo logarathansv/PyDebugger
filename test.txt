@@ -1,0 +1,22 @@
+def factorial(n):
+    if n == 0 or n == 1
+        return 1
+    else:
+        return n*factorial(n-2)
+    
+debugging :
+
+number = 10
+text = " apples"
+result = number + text
+give typeerror
+
+user_input = input("Enter something: ") 
+print("You entered:", user_input) 
+EOFError occurs
+
+learning :
+
+integration of ollama with langchain
+https://chatgpt.com/share/67d077b2-82e0-8005-949d-3e5b3886dbb8
+

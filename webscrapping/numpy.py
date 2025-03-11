@@ -3,8 +3,12 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
 # Define the target website (Replace with your target URL)
-URL = "https://numpy.org/doc/stable/release/2.2.0-notes.html"
-OUTPUT_FILE = "numpy2d2.txt"
+URL = ["https://python.langchain.com/docs/versions/v0_3/","https://python.langchain.com/v0.2/api_reference/openai/index.html","https://python.langchain.com/v0.2/api_reference/anthropic/index.html","https://python.langchain.com/v0.2/api_reference/google_vertexai/index.html",
+        "https://python.langchain.com/v0.2/api_reference/aws/index.html","https://python.langchain.com/v0.2/api_reference/mistralai/index.html","https://python.langchain.com/v0.2/api_reference/huggingface/index.html"]
+OUTPUT_FILE = "langchain.txt"
+all_content = []
+all_links = []
+visited = set()
 
 def scrape_page(url):
     """Scrapes a single webpage and returns its text content and valid links."""
@@ -35,10 +39,6 @@ def scrape_page(url):
 
 def scrape_website(url):
     """Scrapes the main page and follows links up to depth 1."""
-    visited = set()
-    all_content = []
-    all_links = []
-    
     # Scrape the main page
     print(f"Scraping: {url}")
     main_text, main_links = scrape_page(url)
@@ -53,12 +53,11 @@ def scrape_website(url):
             text, _ = scrape_page(link)
             visited.add(link)
             all_content.append(f"Page: {link}\n{text}\n")
-    
-    # Write to a text file
-    with open(OUTPUT_FILE, "w", encoding="utf-8") as file:
-        file.write("\n\n".join(all_content))
-    
-    print(f"Data saved to {OUTPUT_FILE}")
 
-# Run the scraper
-scrape_website(URL)
+for url in URL:
+    scrape_website(url)
+
+with open(OUTPUT_FILE, "w", encoding="utf-8") as file:
+    file.write("\n\n".join(all_content))
+    
+print(f"Data saved to {OUTPUT_FILE}")

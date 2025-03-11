@@ -3,7 +3,7 @@ from langchain.schema import Document
 from openai import BadRequestError
 import streamlit as st
 from langchain_community.document_loaders import PDFPlumberLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_text_splitters import MarkdownTextSplitter, RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 from langchain_core.prompts import ChatPromptTemplate
 from dotenv import load_dotenv
@@ -13,6 +13,21 @@ import json
 from youtube_transcript_api import YouTubeTranscriptApi
 from pptx import Presentation
 from urllib.parse import urlparse, parse_qs
+from sentence_transformers import SentenceTransformer
+from langchain.embeddings.base import Embeddings
+from typing import List
+# import pypandoc
+from docutils.core import publish_parts
+
+class CustomEmbeddings(Embeddings):
+    def __init__(self, model_name: str):
+        self.model = SentenceTransformer(model_name)
+
+    def embed_documents(self, documents: List[str]) -> List[List[float]]:
+        return [self.model.encode(d).tolist() for d in documents]
+
+    def embed_query(self, query: str) -> List[float]:
+        return self.model.encode([query])[0].tolist()
 
 # Load environment variables
 load_dotenv()
@@ -28,6 +43,8 @@ EMBEDDING_MODEL = AzureOpenAIEmbeddings(
     openai_api_version="2023-05-15",
     api_key=AZURE_EMBEDDING_API,
 )
+
+EMBEDDING_MODEL_2 = CustomEmbeddings("all-MiniLM-L6-v2")
 
 # Azure OpenAI API Configuration
 AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
@@ -57,6 +74,7 @@ st.markdown("""
 # System Config
 PDF_STORAGE_PATH = 'document_store/pdfs/'
 CHROMA_DB_PATH = 'chroma_db/'
+CHROMA_DB_PATH_ERROR = 'chroma_db_ERROR/'
 PDF_LIST_PATH = os.path.join(CHROMA_DB_PATH, "pdf_list.json")
 
 # Ensure directories exist
@@ -86,6 +104,13 @@ def extract_video_id(url):
         video_id = parsed_url.path.lstrip("/")
 
     return video_id
+
+def parse_rst(file_path):
+    with open(file_path, "r") as f:
+        rst_content = f.read()
+    # Parse RST into parts (e.g., title, body, etc.)
+    parts = publish_parts(rst_content, writer_name="html")
+    return parts["body"] 
 
 # Function to get only English transcript and align into 30s segments
 def get_english_transcript(video_id, video_name, segment_duration=30):
@@ -131,6 +156,9 @@ def load_pdf_list():
 if "pdf_vector_stores" not in st.session_state:
     st.session_state.pdf_vector_stores = {}
 
+if "error_vector_stores" not in st.session_state:
+    st.session_state.error_vector_stores = {}
+
 if "pdf_list" not in st.session_state:
     st.session_state.pdf_list = load_pdf_list()  # Load PDF list from disk
 
@@ -147,6 +175,15 @@ for pdf_name in st.session_state.pdf_list:
     )
     st.session_state.pdf_vector_stores[pdf_name] = vector_store
 
+for pdf_name in st.session_state.pdf_list:
+    collection_name = pdf_name.replace(" ", "_").lower()
+    vector_store = Chroma(
+        collection_name=collection_name,
+        embedding_function=EMBEDDING_MODEL_2,
+        persist_directory=CHROMA_DB_PATH_ERROR
+    )
+    st.session_state.error_vector_stores[pdf_name] = vector_store
+
 def extract_text_from_txt(file_path):
     with open(file_path, "r", encoding="utf-8") as f:
         return f.read()
@@ -155,14 +192,15 @@ def extract_text_from_pptx(file_path):
     presentation = Presentation(file_path)
     return "\n".join([shape.text for slide in presentation.slides for shape in slide.shapes if hasattr(shape, "text")])
 
-# Save PDF
+def embed_query(query):
+    return EMBEDDING_MODEL.embed_query(query)
+
 def save_uploaded_file(uploaded_file):
     file_path = os.path.join(PDF_STORAGE_PATH, uploaded_file.name)
     with open(file_path, "wb") as file:
         file.write(uploaded_file.getbuffer())
     return file_path
 
-# Process PDF
 def process_document(file_name, file_path):
     file_ext = file_name.split(".")[-1].lower()
     
@@ -171,30 +209,83 @@ def process_document(file_name, file_path):
         docs = loader.load()
     elif file_ext == "txt":
         text = extract_text_from_txt(file_path)
-        docs = [Document(page_content=text)] 
+        docs = [Document(page_content=text)]
     elif file_ext == "pptx":
         text = extract_text_from_pptx(file_path)
-        docs = [Document(page_content=text)] 
+        docs = [Document(page_content=text)]
+    elif file_ext == "csv":
+        text = extract_text_from_csv(file_path)
+        docs = text
+    elif file_ext == "rst" or file_ext == "md":
+        if file_ext == "rst":
+            plain_text = parse_rst(file_path)
+            docs = [Document(page_content=plain_text, metadata={"source": file_name})]
+        else:
+            with open(file_path, "r", encoding="utf-8") as f:
+                markdown_content = f.read()
+            docs = [Document(page_content=markdown_content, metadata={"source": file_name})]
     else:
         st.error("Unsupported file format.")
         return
     
-    chunker = RecursiveCharacterTextSplitter(chunk_size=200, chunk_overlap=50)
-    chunks = chunker.split_documents(docs)
+    if file_ext == "rst":
+        chunker = MarkdownTextSplitter(chunk_size=500, chunk_overlap=100)
+        chunks = chunker.split_documents(docs)
 
-    # Create or load a Chroma collection for the PDF
-    collection_name = file_name.replace(" ", "_").lower()  # Use file name as collection name
-    vector_store = Chroma.from_documents(
-        documents=chunks,
-        embedding=EMBEDDING_MODEL,
-        collection_name=collection_name,
-        persist_directory=CHROMA_DB_PATH
-    )
-    st.session_state.pdf_vector_stores[file_name] = vector_store
+        documents = [
+            Document(
+                page_content=chunk.page_content,
+                metadata={"source": file_name, "chunk_id": i}
+            )
+            for i, chunk in enumerate(chunks)
+        ]
+
+        collection_name = file_name.replace(" ", "_").lower()
+
+        vector_store = Chroma.from_documents(
+            documents=documents,
+            collection_name=collection_name,
+            persist_directory=CHROMA_DB_PATH_ERROR,
+            embedding=EMBEDDING_MODEL_2
+        )
+
+        st.session_state.error_vector_stores[file_name] = vector_store
+    elif file_ext == "md":
+        # if file_ext == "rst" or file_ext == "md":
+        #     chunker = MarkdownTextSplitter(chunk_size=1000, chunk_overlap=200)
+        #     chunks = chunker.split_documents(docs)
+        # else :
+        chunker = MarkdownTextSplitter(chunk_size=500, chunk_overlap=100)
+        chunks = chunker.split_documents(docs)
+        documents = [
+            Document(
+                page_content=chunk.page_content,
+                metadata={"source": file_name, "chunk_id": i}
+            )
+            for i, chunk in enumerate(chunks)
+        ]
+        collection_name = file_name.replace(" ", "_").lower()
+        vector_store = Chroma(
+            embedding_function=EMBEDDING_MODEL,
+            collection_name=collection_name,
+            persist_directory=CHROMA_DB_PATH
+        )
+        vector_store.add_documents(
+            documents=documents,
+        )
+        st.session_state.pdf_vector_stores[file_name] = vector_store
+    
 
     if file_name not in st.session_state.pdf_list:
         st.session_state.pdf_list.append(file_name)
-        save_pdf_list(st.session_state.pdf_list)  # Save updated PDF list to disk
+        save_pdf_list(st.session_state.pdf_list)  # Save updated document list to disk
+
+def extract_text_from_csv(file_path):
+    import pandas as pd
+    
+    df = pd.read_csv(file_path)
+    text = "\n".join(df.astype(str).apply(lambda row: ", ".join(row), axis=1))  # Convert rows to text
+    return text
 
 # Search Relevant Docs
 # def find_context(query, selected_pdfs):
@@ -204,33 +295,45 @@ def process_document(file_name, file_path):
 #         if store:
 #             context_docs.extend(store.similarity_search(query))
 #     return context_docs
-
-def find_context(query, selected_pdfs, threshold=0.7, max_results=5):
+def find_context(query, selected_pdfs, mode):
     context_docs = []
     citations = []
 
     for pdf in selected_pdfs:
-        store = st.session_state.pdf_vector_stores.get(pdf)
+        # Select the correct vector store
+        store = (st.session_state.pdf_vector_stores.get(pdf) 
+                if mode == "Programming Tutor" 
+                else st.session_state.error_vector_stores.get(pdf))
+
+        if not store:
+            print(f"⚠️ No vector store found for {pdf}. Skipping.")
+            continue
         
-        if store:
-            results = store.similarity_search_with_score(query)  # Get scores
-            
-            # Filter out low-confidence matches
-            filtered_results = [(doc, score) for doc, score in results if score >= threshold]
-            
-            # Sort by highest similarity score
-            filtered_results.sort(key=lambda x: x[1], reverse=True)
-            
-            # Select top results
-            top_results = filtered_results[:max_results]
-            
-            # Extract documents & citations
-            for doc, score in top_results:
-                context_docs.append(doc)
-                citations.append((pdf, doc.metadata.get("page", "Unknown"), round(score, 2)))  # Include score
+        # Reformulate query for better retrieval
+        refined_query = f"Provide a detailed response to: {query}"
+
+        # Perform similarity search with score
+        results = store.similarity_search_with_score(refined_query, k=2)
+        
+        # Filter out low-score results
+        filtered_results = [(doc, score) for doc, score in results if score > 0.9]
+
+        if not filtered_results:
+            print(f"⚠️ No relevant results found for query: {query} in {pdf}")
+            continue
+
+        for doc, score in filtered_results:
+            source = doc.metadata.get("source", "Unknown Source")
+            chunk_id = doc.metadata.get("chunk_id", "N/A")
+            page = doc.metadata.get("page", "Unknown")
+
+            print(f"✅ Score: {score:.2f} | Source: {source}, Chunk: {chunk_id}, Page: {page}")
+            print(f"✅ Answer: {doc.page_content[:200]}...\n")
+
+            context_docs.append(doc)
+            citations.append((source, page))
 
     return context_docs, citations
-
 
 def generate_follow_up_hint(chat_history, mode):
     # Extract the conversation context
@@ -264,11 +367,11 @@ def generate_follow_up_hint(chat_history, mode):
 
 def get_chunk_size(query, mode):
     if mode == "Programming Tutor" and len(query) < 50:
-        return 100
+        return 200
     elif mode == "Rubber Duck Assistant":
         return 150
     else:
-        return 100
+        return 200
 # def generate_answer(query, context_docs, citations, mode):
 #     chunk_size = get_chunk_size(query, mode)
 #     context = "\n\n".join([doc.page_content[:chunk_size] for doc in context_docs])
@@ -300,8 +403,8 @@ def generate_answer(query, context_docs, citations, mode):
     # Curriculum-based Assistant Prompt
     if mode == "Programming Tutor":
         prompt = """
-        You are a programming tutor. Explain concepts clearly with examples and best practices.
-        If unsure, say so. Keep explanations concise and beginner-friendly.
+        You are a python programming tutor. Explain concepts clearly with examples and best practices.
+        Keep explanations concise and beginner-friendly. GIve proper links and references with examples.
         
         Query: {query}
         Context: {context}
@@ -346,7 +449,7 @@ st.markdown("---")
 
 # Sidebar - Upload PDFs
 st.sidebar.header("📤 Upload Programming Resources")
-uploaded_files = st.sidebar.file_uploader("Upload PDF, TXT, PPTX", type=["pdf", "txt", "pptx"], accept_multiple_files=True)
+uploaded_files = st.sidebar.file_uploader("Upload PDF, TXT, PPTX, CSV", type=["pdf", "txt", "pptx", "csv", "rst", "md"], accept_multiple_files=True)
 
 # Process New PDFs
 if uploaded_files:
@@ -432,7 +535,7 @@ if selected_pdfs:
 
         # Generate AI response
         with st.spinner("🔍 Searching resources..."):
-            relevant_docs, citations = find_context(user_query, selected_pdfs)
+            relevant_docs, citations = find_context(user_query, selected_pdfs, mode)
             try:
                 ai_response,cited = generate_answer(user_query, relevant_docs,citations, mode)
             except BadRequestError as e:
