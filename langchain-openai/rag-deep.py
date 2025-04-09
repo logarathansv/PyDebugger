@@ -251,13 +251,16 @@ if mode == "Debugging Assistant" and st.session_state.messages and st.session_st
                 st.rerun()
             except Exception as e:
                 st.error(f"Error generating hint: {str(e)}")
+
+#-------------------------------------------------------------------------------------------
+# Add this to your existing imports
 import ast
 import sys
 import traceback
 from io import StringIO
 from contextlib import redirect_stdout, redirect_stderr
 
-
+# Add this class definition somewhere before your main UI code
 class DebugSandbox:
     def __init__(self):
         self.breakpoints = set()
@@ -290,7 +293,7 @@ class DebugSandbox:
         return {
             'output': output.getvalue(),
             'error': error.getvalue(),
-            'variables': {k: v for k, v in self.variables.items() if k != 'self'},  # Exclude self from output
+            'variables': {k: v for k, v in self.variables.items() if k != 'self'},
             'execution_log': self.execution_log
         }
 
@@ -308,7 +311,8 @@ class DebugSandbox:
     def _instrument_statement(self, node):
         self.current_line += 1
         log_expr = ast.Expr(value=ast.Call(
-            func=ast.Attribute(value=ast.Name(id='self', ctx=ast.Load()), attr='_log_execution', ctx=ast.Load()),
+            func=ast.Attribute(value=ast.Name(id='self', ctx=ast.Load()), 
+            attr='_log_execution', ctx=ast.Load()),
             args=[ast.Constant(value=self.current_line)],
             keywords=[]
         ))
@@ -332,81 +336,101 @@ class DebugSandbox:
         """Log execution details"""
         self.execution_log.append({
             'line': line_num,
-            'variables': {k: v for k, v in self.variables.items() if k != 'self'},  # Exclude self from logs
+            'variables': {k: v for k, v in self.variables.items() if k != 'self'},
             'call_stack': traceback.extract_stack()[:-2]
         })
+def generate_answer1(query, code):
+    # Enhanced debugging prompt
+    prompt = """You are a debugging assistant. Analyze the problem and provide step-by-step guidance.
+Context:
+{code}
+Problem: {query}
+Provide:
+1. Error analysis
+2. Step-by-step solution approach
+3. Suggested code fixes (if applicable)
+Guidance:"""
 
+    # Assuming `llm` is a function that takes a prompt and returns a response from a language model
+    answer = llm(prompt.format(code=code, query=query))
+
+    return answer
 
 def get_line_code(full_code, line_num):
     """Returns the specific line of code with line number, plus 2 lines of context"""
     lines = full_code.split('\n')
-    start_line = max(1, line_num - 1)  # Show 1 line before (minimum line 1)
-    end_line = min(len(lines), line_num + 1)  # Show 1 line after
+    start_line = max(1, line_num - 1)
+    end_line = min(len(lines), line_num + 1)
     
     # Format with line numbers
     result = []
     for i in range(start_line, end_line + 1):
-        line_content = lines[i-1]  # Lines are 0-indexed in list
-        prefix = ">>" if i == line_num else f"{i:4}"  # Mark error line
+        line_content = lines[i-1]
+        prefix = ">>" if i == line_num else f"{i:4}"
         result.append(f"{prefix}: {line_content}")
     
     return '\n'.join(result)
 
-def show_debug_sandbox():
-    st.title("🐞 Python Debugging Sandbox")
+# Modify your sidebar to include the debug sandbox option
+with st.sidebar:
+    st.header("🔧 Tools")
+    if st.checkbox("Show Debug Sandbox", key="show_debug_sandbox"):
+        st.session_state.show_sandbox = True
+    else:
+        st.session_state.show_sandbox = False
 
+# Add this after your main chat interface
+if st.session_state.get('show_sandbox', False):
+    st.markdown("---")
+    st.title("🐞 Python Debugging Sandbox")
+    
+    # Add some CSS for the debug sandbox
     st.markdown("""
         <style>
-        .stTextArea textarea {
-        width: 100% !important;
-    }
-    </style>
+        .debug-container {
+            border: 1px solid #3A3A3A;
+            border-radius: 5px;
+            padding: 15px;
+            margin-bottom: 20px;
+            background-color: #1E1E1E;
+        }
+        .debug-tabs .stTab {
+            background-color: #1E1E1E !important;
+        }
+        </style>
     """, unsafe_allow_html=True)
-
+    
     code = st.text_area("Enter Python code to debug:", height=300, key="debug_code")
-    if st.button("Run with Debugging"):
-        sandbox = DebugSandbox()
-        result = sandbox.execute_with_debug(code)
-
-        st.session_state.debug_result = result
-        st.session_state.stored_code = code
-
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Run with Debugging"):
+            sandbox = DebugSandbox()
+            result = sandbox.execute_with_debug(code)
+            st.session_state.debug_result = result
+            st.session_state.stored_code = code
+    
     if 'debug_result' in st.session_state:
         result = st.session_state.debug_result
         code = st.session_state.stored_code
-
-        # with col2:
-        #     st.markdown("**Execution Trace**")
-        #     if result['execution_log']:
-        #         for log in result['execution_log']:
-        #             st.code(f"Line {log['line']}", language='python')
-        #             with st.expander("Variables at this point"):
-        #                 st.json(log['variables'])
-        #     else:
-        #         st.info("No execution steps recorded")
-
+        
         st.markdown("### Execution Results")
-        tab1, tab3 = st.tabs(["Output", "Errors"])
-
+        tab1, tab2, tab3 = st.tabs(["Output", "Variables", "Errors"])
+        
         with tab1:
             st.code(result['output'] or "No output", language='text')
-
-        # with tab2:
-        #     st.json(result['variables'])
-
+        
+        with tab2:
+            st.json(result['variables'])
+        
         with tab3:
             if result['error']:
-                # Enhanced error display
                 st.error("**Error Details**")
                 st.code(result['error'], language='python')
                 
-                # Improved error parsing
                 error_lines = result['error'].strip().split('\n')
                 if error_lines:
-                    # Get last line which typically contains the error type and message
                     last_line = error_lines[-1]
-                    
-                    # Extract error type and message
                     if ':' in last_line:
                         error_type, error_message = last_line.split(':', 1)
                         error_type = error_type.strip()
@@ -414,12 +438,11 @@ def show_debug_sandbox():
                     else:
                         error_type = "Error"
                         error_message = last_line.strip()
-                    
+                        answer=generate_answer(error_message,code)
                     st.markdown("**Debug Summary**")
                     st.error(f"**Error Type:** `{error_type}`")
                     st.error(f"**Error Message:** `{error_message}`")
-                    
-                    # Find the line number in the traceback
+                    st.markdown(f"**Debug Summary from llm** `{generate_answer1(error_message,code)}`")
                     error_line = None
                     for line in error_lines:
                         if "line " in line.lower() and ", in " in line.lower():
@@ -427,7 +450,6 @@ def show_debug_sandbox():
                                 line_part = line.split("line ")[1]
                                 line_num = line_part.split(",")[0] if "," in line_part else line_part
                                 error_line = int(line_num.strip())
-                                # break
                             except (IndexError, ValueError):
                                 continue
                     
@@ -437,21 +459,4 @@ def show_debug_sandbox():
             else:
                 st.success("No errors detected")
 
-        # if result['execution_log']:
-        #     st.markdown("### Step-through Debugger")
-        #     if len(result['execution_log']) > 1:
-        #         current_step = st.slider(
-        #             "Execution step", 
-        #             0, 
-        #             len(result['execution_log']) - 1, 
-        #             0,
-        #             key="debug_step"
-        #         )
-        #     else:
-        #         current_step = 0
-            
-        #     selected_step = result['execution_log'][current_step]
-        #     st.markdown(f"**Line {selected_step['line']}**")
-        #     st.code(get_line_code(code, selected_step['line']), language='python')
-        #     st.markdown("**Variable State**")
-        #     st.json(selected_step['variables'])
+# Modify your generate_answer function to handle debugging queries
