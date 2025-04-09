@@ -57,7 +57,8 @@ LANGUAGE_MODEL = AzureChatOpenAI(
     openai_api_version="2025-01-01-preview",
     deployment_name=AZURE_DEPLOYMENT_NAME,
     openai_api_key=AZURE_OPENAI_KEY,
-    temperature=0.3
+    temperature=0.3,
+    max_retries=10
 )
 
 # Dark Mode UI
@@ -228,7 +229,7 @@ def process_document(file_name, file_path):
         st.error("Unsupported file format.")
         return
     
-    if file_ext == "rst":
+    if file_ext == "md" or file_ext == "rst":
         chunker = MarkdownTextSplitter(chunk_size=500, chunk_overlap=100)
         chunks = chunker.split_documents(docs)
 
@@ -250,13 +251,14 @@ def process_document(file_name, file_path):
         )
 
         st.session_state.error_vector_stores[file_name] = vector_store
-    elif file_ext == "md":
+    else:
         # if file_ext == "rst" or file_ext == "md":
         #     chunker = MarkdownTextSplitter(chunk_size=1000, chunk_overlap=200)
         #     chunks = chunker.split_documents(docs)
         # else :
-        chunker = MarkdownTextSplitter(chunk_size=500, chunk_overlap=100)
+        chunker = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=200)
         chunks = chunker.split_documents(docs)
+        
         documents = [
             Document(
                 page_content=chunk.page_content,
@@ -264,6 +266,7 @@ def process_document(file_name, file_path):
             )
             for i, chunk in enumerate(chunks)
         ]
+        print("chunks : (FIrst 1000 characters)", documents[:1000])
         collection_name = file_name.replace(" ", "_").lower()
         vector_store = Chroma(
             embedding_function=EMBEDDING_MODEL,
@@ -274,6 +277,11 @@ def process_document(file_name, file_path):
             documents=documents,
         )
         st.session_state.pdf_vector_stores[file_name] = vector_store
+        stored_data = vector_store.get(include=["embeddings", "documents", "metadatas"])
+
+        # Print embeddings
+        for i, embedding in enumerate(stored_data["embeddings"]):
+            print(f"Chunk {i} Embedding: {embedding[:5]}... (first 5 values)")
     
 
     if file_name not in st.session_state.pdf_list:
@@ -311,12 +319,12 @@ def find_context(query, selected_pdfs, mode):
         
         # Reformulate query for better retrieval
         refined_query = f"Provide a detailed response to: {query}"
-
+        
         # Perform similarity search with score
-        results = store.similarity_search_with_score(refined_query, k=2)
+        results = store.similarity_search_with_score(refined_query, k=3)
         
         # Filter out low-score results
-        filtered_results = [(doc, score) for doc, score in results if score > 0.9]
+        filtered_results = [(doc, score) for doc, score in results]
 
         if not filtered_results:
             print(f"⚠️ No relevant results found for query: {query} in {pdf}")
@@ -517,7 +525,7 @@ if st.sidebar.button("❌ Delete Files") and delete_pdf != "None":
     st.sidebar.success(f"Deleted {delete_pdf}")
 
 # Chatbot Mode Selection
-mode = st.radio("Choose Assistant Mode:", ["Programming Tutor", "Rubber Duck Assistant"])
+mode = st.radio("Choose Assistant Mode:", ["Rubber Duck Assistant","Programming Tutor"])
 
 # Chat Section
 if selected_pdfs:

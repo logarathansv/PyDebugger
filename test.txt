@@ -17,6 +17,7 @@ EOFError occurs
 
 learning :
 
-integration of ollama with langchain
+integration of ollama with langchain give the installation steps and invocation methods
 https://chatgpt.com/share/67d077b2-82e0-8005-949d-3e5b3886dbb8
 
+integration of openai with langchain give the installation steps and invocation methods
