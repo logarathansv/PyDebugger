@@ -19,8 +19,6 @@ from typing import List
 from together import Together
 from docutils.core import publish_parts
 from transformers import AutoTokenizer
-from streamlit.components.v1 import html
-import json
 
 # Handle editor updates
 if "EDITOR_UPDATE" in st.session_state:
@@ -195,7 +193,8 @@ if "pdf_list" not in st.session_state:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-st.session_state.mode = "Rubber Duck Assistant"
+if "mode" not in st.session_state:
+    st.session_state.mode = "Rubber Duck Assistant"
 
 # Load existing Chroma collections
 for pdf_name in st.session_state.pdf_list:
@@ -521,10 +520,6 @@ def generate_answer(query, context_docs, citations, mode):
     #     # time.sleep(20)
     return answer,formatted_citations
 
-# UI Header
-st.title(st.session_state.mode == 'Programming Tutor' and "🏫 Programming Tutor" or "🐤 Rubber Duck Assistant")
-st.markdown("---")
-
 # Sidebar - Upload PDFs
 st.sidebar.header("📤 Upload Programming Resources")
 uploaded_files = st.sidebar.file_uploader("Upload PDF, TXT, PPTX, CSV", type=["pdf", "txt", "pptx", "csv", "rst", "md"], accept_multiple_files=True)
@@ -536,6 +531,9 @@ if uploaded_files:
             file_path = save_uploaded_file(pdf)
             process_document(pdf.name, file_path)
     st.sidebar.success("✅ Documents uploaded! Select them below.")
+
+st.title("Programming Tutor "+ "&"+ " Rubber Duck Assistant")
+st.markdown("---")
 
 st.sidebar.header("📹 YouTube Transcript Extractor")
 st.sidebar.caption("Paste a YouTube link to extract and save the transcript.")
@@ -595,8 +593,8 @@ if st.sidebar.button("❌ Delete Files") and delete_pdf != "None":
     st.sidebar.success(f"Deleted {delete_pdf}")
 
 # Chatbot Mode Selection
-st.session_state.mode = st.radio("Choose Assistant Mode:", ["Rubber Duck Assistant","Programming Tutor"])
-
+mode = st.radio("Choose Assistant Mode:", ["Rubber Duck Assistant","Programming Tutor"])
+st.session_state.mode = mode
 # Chat Section
 if selected_pdfs:
     for message in st.session_state.messages:
