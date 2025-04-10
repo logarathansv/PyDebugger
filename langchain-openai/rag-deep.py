@@ -355,6 +355,24 @@ Guidance:"""
     answer = llm(prompt.format(code=code, query=query))
 
     return answer
+def generate_follow_up_hint1(chat_history):
+    # Extract the conversation context
+    conversation_context = "\n".join([f"{msg['role']}: {msg['content']}" for msg in chat_history])
+    print(conversation_context)  # Optional: remove or log only in debug mode
+
+    # Define the prompt with correct formatting
+    prompt = """You are a rubber duck debugging assistant. Provide another guiding question or hint to help the user think through their problem.
+
+Conversation:
+{conversation_context}
+
+Hint:"""
+
+    # Format prompt using ChatPromptTemplate
+    conversation_prompt = ChatPromptTemplate.from_template(prompt)
+
+    return llm(prompt.format(conversation_context=conversation_context))
+
 
 def get_line_code(full_code, line_num):
     """Returns the specific line of code with line number, plus 2 lines of context"""
@@ -409,6 +427,15 @@ if st.session_state.get('show_sandbox', False):
             result = sandbox.execute_with_debug(code)
             st.session_state.debug_result = result
             st.session_state.stored_code = code
+        if st.button("💡 Need another hint"):
+            with st.spinner("Generating hint..."):
+                try:
+                    hint = generate_follow_up_hint1(st.session_state.messages)
+                    st.markdown(f"**hint** `{hint}`")
+            
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error generating hint: {str(e)}")
     
     if 'debug_result' in st.session_state:
         result = st.session_state.debug_result
@@ -443,6 +470,7 @@ if st.session_state.get('show_sandbox', False):
                     st.error(f"**Error Type:** `{error_type}`")
                     st.error(f"**Error Message:** `{error_message}`")
                     st.markdown(f"**Debug Summary from llm** `{generate_answer1(error_message,code)}`")
+                   
                     error_line = None
                     for line in error_lines:
                         if "line " in line.lower() and ", in " in line.lower():
