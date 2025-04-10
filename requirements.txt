@@ -12,3 +12,4 @@ sentence-transformers
 together
 docutils
 transformers
+chromadb
