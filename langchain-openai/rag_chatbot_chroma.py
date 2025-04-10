@@ -20,12 +20,8 @@ from together import Together
 from docutils.core import publish_parts
 from transformers import AutoTokenizer
 
-# Handle editor updates
-if "EDITOR_UPDATE" in st.session_state:
-    update = st.session_state.EDITOR_UPDATE
-    st.session_state[f"editor_{update['key']}"] = update["value"]
-    st.session_state.debug_code = update["value"]
-    st.rerun()
+if "llm_summary_generated" not in st.session_state:
+    st.session_state.llm_summary_generated = False
 
 class CustomEmbeddings(Embeddings):
     def __init__(self, model_name: str):
@@ -900,12 +896,13 @@ if st.session_state.mode == "Rubber Duck Assistant":
                         st.error(f"**Error Location:** Line {error_line}")
                         st.code(get_line_code(code, error_line), language='python')
 
-                    if "llm_summary_generated" not in st.session_state:
+                    if st.session_state.llm_summary_generated == False:
                         response_llm = generate_answer1(error_message, code)
                         st.markdown("**Debug Summary from LLM** ")
                         st.markdown(f"{response_llm}")
                         st.session_state.messages.append({"role": "assistant", "content": response_llm})
                         st.session_state.llm_summary_generated = True
+                        
                     if st.session_state.mode == "Rubber Duck Assistant" and st.session_state.messages and st.session_state.messages[-1]["role"] == "assistant":
                         if st.button("Need another hint"):
                             # Generate a follow-up hint based on the conversation context
