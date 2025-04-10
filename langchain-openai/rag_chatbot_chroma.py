@@ -73,6 +73,9 @@ LANGUAGE_MODEL = AzureChatOpenAI(
     max_retries=10
 )
 
+st.set_page_config(
+    page_title="PyDebug",  # Replace with your desired title
+    page_icon="🔧")
 # Dark Mode UI
 st.markdown("""
     <style>
@@ -385,7 +388,9 @@ def find_context(query, selected_pdfs, mode):
 
 def generate_follow_up_hint(chat_history, mode):
     # Extract the conversation context
-    conversation_context = "\n".join([f"{msg['role']}: {msg['content']}" for msg in chat_history])
+    print(chat_history)
+    conversation_context = "\n".join([f"{msg[0]}: {msg[1]}" for msg in chat_history])
+    conversation_context = conversation_context[:200]
     print(conversation_context)
     # Define the follow-up hint prompt
     if st.session_state.mode == "Programming Tutor":
@@ -794,15 +799,14 @@ class DebugSandbox:
 
 def generate_answer1(query, code):
     # Enhanced debugging prompt
-    prompt = """You are a debugging assistant. Analyze the problem and provide step-by-step guidance.
+    prompt = """You are a debugging assistant. Analyze the problem and provide hint-by-hint guidance.
         Context:
         {code}
         Problem: {query}
         Provide:
-        1. Error analysis
-        2. Step-by-step solution approach
-        3. Suggested code fixes (if applicable)
-        Guidance:"""
+        1.Give a hint
+        2.Error analysis for the error and details about it
+        3.Give links/reference to same issues"""
 
     # Assuming `llm` is a function that takes a prompt and returns a response from a language model
     answer = LANGUAGE_MODEL.invoke(prompt.format(code=code, query=query))
@@ -851,6 +855,7 @@ if st.session_state.mode == "Rubber Duck Assistant":
             result = sandbox.execute_with_debug(st.session_state.debug_code)
             st.session_state.debug_result = result
             st.session_state.stored_code = code
+            st.session_state.llm_summary_generated = False
     
     if 'debug_result' in st.session_state:
         result = st.session_state.debug_result
@@ -877,7 +882,7 @@ if st.session_state.mode == "Rubber Duck Assistant":
                     else:
                         error_type = "Error"
                         error_message = last_line.strip()
-                        answer=generate_answer(error_message,code)
+                        # answer=generate_answer(error_message,code)
                     st.markdown("**Debug Summary**")
                     st.error(f"**Error Type:** `{error_type}`")
                     st.error(f"**Error Message:** `{error_message}`")
@@ -895,11 +900,12 @@ if st.session_state.mode == "Rubber Duck Assistant":
                         st.error(f"**Error Location:** Line {error_line}")
                         st.code(get_line_code(code, error_line), language='python')
 
-                    response_llm = generate_answer1(error_message,code)
-                    st.markdown(f"**Debug Summary from LLM** ")
-                    st.markdown(f"{response_llm}")
-                    st.session_state.messages.append({"role": "assistant", "content": response_llm})
-
+                    if "llm_summary_generated" not in st.session_state:
+                        response_llm = generate_answer1(error_message, code)
+                        st.markdown("**Debug Summary from LLM** ")
+                        st.markdown(f"{response_llm}")
+                        st.session_state.messages.append({"role": "assistant", "content": response_llm})
+                        st.session_state.llm_summary_generated = True
                     if st.session_state.mode == "Rubber Duck Assistant" and st.session_state.messages and st.session_state.messages[-1]["role"] == "assistant":
                         if st.button("Need another hint"):
                             # Generate a follow-up hint based on the conversation context
