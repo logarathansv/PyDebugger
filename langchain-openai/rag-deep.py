@@ -12,7 +12,12 @@ from urllib.parse import urlparse, parse_qs
 import json
 import time
 from pptx import Presentation
-
+import ast
+import sys
+import traceback
+from io import StringIO
+from contextlib import redirect_stdout, redirect_stderr
+import re
 # Initialize with deepseek-r1:1.5b model
 OLLAMA_MODEL = "deepseek-r1:1.5b"
 
@@ -236,8 +241,14 @@ if prompt := st.chat_input("Ask a question..."):
             try:
                 context_docs, citations = find_context(prompt, selected_docs, mode)
                 answer = generate_answer(prompt, context_docs, citations, mode)
+                think_match = re.search(r"<think>(.*?)</think>", answer, re.DOTALL)
+                think_text = think_match.group(1).strip() if think_match else ""
+
+# Remove <think>...</think> from the main message
+                cleaned_answer = re.sub(r"<think>.*?</think>", "", answer, flags=re.DOTALL).strip()
+
                 st.markdown(answer)
-                st.session_state.messages.append({"role": "assistant", "content": answer})
+                st.session_state.messages.append({"role": "assistant", "content": cleaned_answer})
             except Exception as e:
                 st.error(f"Error: {str(e)}")
 
@@ -247,18 +258,19 @@ if mode == "Debugging Assistant" and st.session_state.messages and st.session_st
         with st.spinner("Generating hint..."):
             try:
                 hint = generate_follow_up_hint(st.session_state.messages, mode)
-                st.session_state.messages.append({"role": "assistant", "content": hint})
+                think_match = re.search(r"<think>(.*?)</think>", hint, re.DOTALL)
+                think_text = think_match.group(1).strip() if think_match else ""
+
+# Remove <think>...</think> from the main message
+                cleaned_hint = re.sub(r"<think>.*?</think>", "", hint, flags=re.DOTALL).strip()
+
+                st.session_state.messages.append({"role": "assistant", "content": cleaned_hint})
                 st.rerun()
             except Exception as e:
                 st.error(f"Error generating hint: {str(e)}")
 
 #-------------------------------------------------------------------------------------------
 # Add this to your existing imports
-import ast
-import sys
-import traceback
-from io import StringIO
-from contextlib import redirect_stdout, redirect_stderr
 
 # Add this class definition somewhere before your main UI code
 class DebugSandbox:
