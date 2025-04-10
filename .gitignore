@@ -1,0 +1,7 @@
+.env
+.idea
+.devcontainer
+.vscode
+__pycache__
+deep-api
+together
