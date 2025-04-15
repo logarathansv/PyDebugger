@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
 import time
 import json
+import torch
 from youtube_transcript_api import YouTubeTranscriptApi
 from pptx import Presentation
 from urllib.parse import urlparse, parse_qs
@@ -22,22 +23,29 @@ from docutils.core import publish_parts
 from transformers import AutoTokenizer
 from langchain.retrievers import ContextualCompressionRetriever
 from langchain.retrievers.document_compressors import LLMChainExtractor
+from diskcache import Cache
 
 if "llm_summary_generated" not in st.session_state:
     st.session_state.llm_summary_generated = False
 
 class CustomEmbeddings(Embeddings):
-    def __init__(self, model_name: str):
-        self.model = SentenceTransformer(model_name)
-
+    def __init__(self, model_name: str, device: str = None):
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.model = SentenceTransformer(model_name, device="cpu")  # Initialize on CPU first
+        self.model.to(self.device)  # Now move to target device
+        
     def embed_documents(self, documents: List[str]) -> List[List[float]]:
-        return [self.model.encode(d).tolist() for d in documents]
-
+        with torch.no_grad():
+            return [self.model.encode(d, convert_to_tensor=True).cpu().numpy().tolist() 
+                    for d in documents]
+    
     def embed_query(self, query: str) -> List[float]:
-        return self.model.encode([query])[0].tolist()
+        with torch.no_grad():
+            return self.model.encode([query], convert_to_tensor=True)[0].cpu().numpy().tolist()
 
 # Load environment variables
 load_dotenv()
+cache = Cache("~/.rag_cache")
 
 # Azure OpenAI Embeddings Configuration
 AZURE_EMBEDDING_ENDPOINT = os.getenv("AZURE_EMBEDDING_OPENAI")
