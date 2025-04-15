@@ -1,4 +1,5 @@
 import os
+import faiss
 from langchain.schema import Document
 from openai import BadRequestError
 import streamlit as st
@@ -21,6 +22,7 @@ from docutils.core import publish_parts
 from transformers import AutoTokenizer
 from langchain.retrievers import ContextualCompressionRetriever
 from langchain.retrievers.document_compressors import LLMChainExtractor
+from diskcache import Cache
 
 if "llm_summary_generated" not in st.session_state:
     st.session_state.llm_summary_generated = False
@@ -37,6 +39,7 @@ class CustomEmbeddings(Embeddings):
 
 # Load environment variables
 load_dotenv()
+cache = Cache("~/.rag_cache")
 
 # Azure OpenAI Embeddings Configuration
 AZURE_EMBEDDING_ENDPOINT = os.getenv("AZURE_EMBEDDING_OPENAI")
@@ -312,7 +315,8 @@ def process_document(file_name, file_path):
 
         vector_store = FAISS.from_documents(
             documents=documents,
-            embedding=EMBEDDING_MODEL_2
+            embedding=EMBEDDING_MODEL_2,
+            metric_type=faiss.METRIC_INNER_PRODUCT
         )
         vector_store.save_local(os.path.join(VECTOR_DB_PATH_ERROR, file_name.replace(" ", "_").lower()))
         st.session_state.error_vector_stores[file_name] = vector_store
@@ -345,6 +349,7 @@ def extract_text_from_csv(file_path):
     text = "\n".join(df.astype(str).apply(lambda row: ", ".join(row), axis=1))
     return text
 
+@cache.memoize()
 def find_context(query, selected_pdfs, mode):
     context_docs = []
     citations = []
@@ -361,7 +366,8 @@ def find_context(query, selected_pdfs, mode):
         compressor = LLMChainExtractor.from_llm(LANGUAGE_MODEL)
         compression_retriever = ContextualCompressionRetriever(
             base_compressor=compressor,
-            base_retriever=store.as_retriever(search_kwargs={"k": 3})
+            base_retriever=store.as_retriever(search_kwargs={"k": 3},
+            )
         )        
         # Get compressed documents
         compressed_docs = compression_retriever.get_relevant_documents(query)
@@ -386,6 +392,7 @@ def find_context(query, selected_pdfs, mode):
 
     return context_docs, citations
 
+@cache.memoize()
 def generate_answer(query, context_docs, citations, mode):
     # Prepare context with clear source attribution
     context_with_sources = []
