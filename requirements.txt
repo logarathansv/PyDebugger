@@ -14,3 +14,4 @@ docutils
 transformers
 chromadb
 faiss-cpu
+diskcache
