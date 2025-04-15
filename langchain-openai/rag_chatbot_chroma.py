@@ -347,6 +347,7 @@ def extract_text_from_csv(file_path):
     text = "\n".join(df.astype(str).apply(lambda row: ", ".join(row), axis=1))
     return text
 
+@cache.memoize()
 def find_context(query, selected_pdfs, mode):
     context_docs = []
     citations = []
@@ -389,6 +390,7 @@ def find_context(query, selected_pdfs, mode):
 
     return context_docs, citations
 
+@cache.memoize()
 def generate_answer(query, context_docs, citations, mode):
     # Prepare context with clear source attribution
     context_with_sources = []
