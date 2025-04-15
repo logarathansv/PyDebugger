@@ -4,7 +4,7 @@ from openai import BadRequestError
 import streamlit as st
 from langchain_community.document_loaders import PDFPlumberLoader
 from langchain_text_splitters import MarkdownTextSplitter, RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import Chroma
+from langchain_community.vectorstores import FAISS  # Changed from Chroma to FAISS for efficiency
 from langchain_core.prompts import ChatPromptTemplate
 from dotenv import load_dotenv
 from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
@@ -19,6 +19,8 @@ from typing import List
 from together import Together
 from docutils.core import publish_parts
 from transformers import AutoTokenizer
+from langchain.retrievers import ContextualCompressionRetriever
+from langchain.retrievers.document_compressors import LLMChainExtractor
 
 if "llm_summary_generated" not in st.session_state:
     st.session_state.llm_summary_generated = False
@@ -80,18 +82,32 @@ st.markdown("""
     .stChatMessage p, .stChatMessage div { color: #FFFFFF !important; }
     .stFileUploader { background-color: #1E1E1E; border: 1px solid #3A3A3A; border-radius: 5px; padding: 15px; }
     h1, h2, h3 { color: #00FFAA !important; }
+    .context-box { 
+        background-color: #1E1E1E; 
+        border: 1px solid #3A3A3A; 
+        border-radius: 5px; 
+        padding: 10px; 
+        margin-top: 10px;
+        font-family: monospace;
+        font-size: 0.9em;
+    }
+    .context-title {
+        color: #00FFAA;
+        font-weight: bold;
+        margin-bottom: 5px;
+    }
     </style>
     """, unsafe_allow_html=True)
 
 # System Config
 PDF_STORAGE_PATH = 'document_store/pdfs/'
-CHROMA_DB_PATH = 'chroma_db/'
-CHROMA_DB_PATH_ERROR = 'chroma_db_ERROR/'
-PDF_LIST_PATH = os.path.join(CHROMA_DB_PATH, "pdf_list.json")
+VECTOR_DB_PATH = 'vector_db/'
+VECTOR_DB_PATH_ERROR = 'vector_db_ERROR/'
+PDF_LIST_PATH = os.path.join(VECTOR_DB_PATH, "pdf_list.json")
 
 # Ensure directories exist
 os.makedirs(PDF_STORAGE_PATH, exist_ok=True)
-os.makedirs(CHROMA_DB_PATH, exist_ok=True)
+os.makedirs(VECTOR_DB_PATH, exist_ok=True)
 
 def format_time(seconds):
     hours = int(seconds // 3600)
@@ -99,13 +115,12 @@ def format_time(seconds):
     secs = int(seconds % 60)
     return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
-# Function to save transcript
 def save_transcript(video_name, transcript_text):
     file_path = os.path.join(PDF_STORAGE_PATH, f"{video_name}.txt")
     with open(file_path, "w", encoding="utf-8") as file:
         file.write(transcript_text)
     return file_path
-# Function to extract YouTube Video ID from URL
+
 def extract_video_id(url):
     parsed_url = urlparse(url)
     video_id = None
@@ -120,17 +135,14 @@ def extract_video_id(url):
 def parse_rst(file_path):
     with open(file_path, "r") as f:
         rst_content = f.read()
-    # Parse RST into parts (e.g., title, body, etc.)
     parts = publish_parts(rst_content, writer_name="html")
     return parts["body"] 
 
-# Function to get only English transcript and align into 30s segments
 def get_english_transcript(video_id, video_name, segment_duration=30):
     try:
         transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
         transcript = transcript_list.find_transcript(['en']).fetch()
         
-        # Organize transcript into 30-second segments
         segments = []
         current_segment = []
         start_time = 0
@@ -143,11 +155,9 @@ def get_english_transcript(video_id, video_name, segment_duration=30):
             
             current_segment.append(entry["text"])
 
-        # Save the last segment
         if current_segment:
             segments.append(f"[{format_time(start_time)}] " + " ".join(current_segment))
 
-        # Save to a text file
         file_path = save_transcript(video_name, "\n".join(segments))
         return file_path, "\n".join(segments)
 
@@ -187,7 +197,7 @@ if "error_vector_stores" not in st.session_state:
     st.session_state.error_vector_stores = {}
 
 if "pdf_list" not in st.session_state:
-    st.session_state.pdf_list = load_pdf_list()  # Load PDF list from disk
+    st.session_state.pdf_list = load_pdf_list()
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -195,24 +205,57 @@ if "messages" not in st.session_state:
 if "mode" not in st.session_state:
     st.session_state.mode = "Rubber Duck Assistant"
 
-# Load existing Chroma collections
+# Load existing FAISS vector stores
 for pdf_name in st.session_state.pdf_list:
-    collection_name = pdf_name.replace(" ", "_").lower()
-    vector_store = Chroma(
-        collection_name=collection_name,
-        embedding_function=EMBEDDING_MODEL,
-        persist_directory=CHROMA_DB_PATH
-    )
-    st.session_state.pdf_vector_stores[pdf_name] = vector_store
+    try:
+        vector_store = FAISS.load_local(
+            os.path.join(VECTOR_DB_PATH, pdf_name.replace(" ", "_").lower()),
+            EMBEDDING_MODEL,
+            allow_dangerous_deserialization=True
+        )
+        st.session_state.pdf_vector_stores[pdf_name] = vector_store
+        
+        vector_store_error = FAISS.load_local(
+            os.path.join(VECTOR_DB_PATH_ERROR, pdf_name.replace(" ", "_").lower()),
+            EMBEDDING_MODEL_2,
+            allow_dangerous_deserialization=True
+        )
+        st.session_state.error_vector_stores[pdf_name] = vector_store_error
+    except:
+        pass
 
-for pdf_name in st.session_state.pdf_list:
-    collection_name = pdf_name.replace(" ", "_").lower()
-    vector_store = Chroma(
-        collection_name=collection_name,
-        embedding_function=EMBEDDING_MODEL_2,
-        persist_directory=CHROMA_DB_PATH_ERROR
-    )
-    st.session_state.error_vector_stores[pdf_name] = vector_store
+def generate_follow_up_hint(chat_history, mode):
+    # Extract the conversation context
+    print(chat_history)
+    conversation_context = "\n".join([f"{msg[0]}: {msg[1]}" for msg in chat_history])
+    conversation_context = conversation_context[:200]
+    print(conversation_context)
+    # Define the follow-up hint prompt
+    if st.session_state.mode == "Programming Tutor":
+        prompt = """
+        You are a programming tutor. Provide another hint or clarification based on the conversation below.
+        Keep your response concise and helpful.
+
+        Conversation:
+        {conversation_context}
+
+        Hint:
+        """
+    elif st.session_state.mode == "Rubber Duck Assistant":
+        prompt = """
+        You are a rubber duck debugging assistant. Provide another guiding question or hint to help the user think through their problem.
+
+        Conversation:
+        {conversation_context}
+
+        Hint:
+        """
+
+    # Generate the follow-up hint
+    conversation_prompt = ChatPromptTemplate.from_template(prompt)
+    response_chain = conversation_prompt | LANGUAGE_MODEL
+    return response_chain.invoke({"conversation_context": conversation_context})
+
 
 def extract_text_from_txt(file_path):
     with open(file_path, "r", encoding="utf-8") as f:
@@ -221,9 +264,6 @@ def extract_text_from_txt(file_path):
 def extract_text_from_pptx(file_path):
     presentation = Presentation(file_path)
     return "\n".join([shape.text for slide in presentation.slides for shape in slide.shapes if hasattr(shape, "text")])
-
-def embed_query(query):
-    return EMBEDDING_MODEL.embed_query(query)
 
 def save_uploaded_file(uploaded_file):
     file_path = os.path.join(PDF_STORAGE_PATH, uploaded_file.name)
@@ -270,21 +310,13 @@ def process_document(file_name, file_path):
             for i, chunk in enumerate(chunks)
         ]
 
-        collection_name = file_name.replace(" ", "_").lower()
-
-        vector_store = Chroma.from_documents(
+        vector_store = FAISS.from_documents(
             documents=documents,
-            collection_name=collection_name,
-            persist_directory=CHROMA_DB_PATH_ERROR,
             embedding=EMBEDDING_MODEL_2
         )
-
+        vector_store.save_local(os.path.join(VECTOR_DB_PATH_ERROR, file_name.replace(" ", "_").lower()))
         st.session_state.error_vector_stores[file_name] = vector_store
     else:
-        # if file_ext == "rst" or file_ext == "md":
-        #     chunker = MarkdownTextSplitter(chunk_size=1000, chunk_overlap=200)
-        #     chunks = chunker.split_documents(docs)
-        # else :
         chunker = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=200)
         chunks = chunker.split_documents(docs)
         
@@ -295,231 +327,118 @@ def process_document(file_name, file_path):
             )
             for i, chunk in enumerate(chunks)
         ]
-        print("chunks : (FIrst 1000 characters)", documents[:1000])
-        collection_name = file_name.replace(" ", "_").lower()
-        vector_store = Chroma(
-            embedding_function=EMBEDDING_MODEL,
-            collection_name=collection_name,
-            persist_directory=CHROMA_DB_PATH
-        )
-        vector_store.add_documents(
+        
+        vector_store = FAISS.from_documents(
             documents=documents,
+            embedding=EMBEDDING_MODEL
         )
+        vector_store.save_local(os.path.join(VECTOR_DB_PATH, file_name.replace(" ", "_").lower()))
         st.session_state.pdf_vector_stores[file_name] = vector_store
-        stored_data = vector_store.get(include=["embeddings", "documents", "metadatas"])
-
-        # Print embeddings
-        for i, embedding in enumerate(stored_data["embeddings"]):
-            print(f"Chunk {i} Embedding: {embedding[:5]}... (first 5 values)")
-    
 
     if file_name not in st.session_state.pdf_list:
         st.session_state.pdf_list.append(file_name)
-        save_pdf_list(st.session_state.pdf_list)  # Save updated document list to disk
+        save_pdf_list(st.session_state.pdf_list)
 
 def extract_text_from_csv(file_path):
     import pandas as pd
-    
     df = pd.read_csv(file_path)
-    text = "\n".join(df.astype(str).apply(lambda row: ", ".join(row), axis=1))  # Convert rows to text
+    text = "\n".join(df.astype(str).apply(lambda row: ", ".join(row), axis=1))
     return text
 
-# Search Relevant Docs
-# def find_context(query, selected_pdfs):
-#     context_docs = []
-#     for pdf in selected_pdfs:
-#         store = st.session_state.pdf_vector_stores.get(pdf)
-#         if store:
-#             context_docs.extend(store.similarity_search(query))
-#     return context_docs
 def find_context(query, selected_pdfs, mode):
     context_docs = []
-    citations = []  # This will store citation objects
+    citations = []
     
     for pdf in selected_pdfs:
-        # Select vector store (existing code)
         store = (st.session_state.pdf_vector_stores.get(pdf) 
                 if mode == "Programming Tutor" 
                 else st.session_state.error_vector_stores.get(pdf))
 
         if not store:
-            print(f"⚠️ No vector store found for {pdf}. Skipping.")
             continue
                 
-        # Perform search (existing code)
-        results = store.similarity_search_with_score(query, k=3)
+        # Create a retriever with compression for better results
+        compressor = LLMChainExtractor.from_llm(LANGUAGE_MODEL)
+        compression_retriever = ContextualCompressionRetriever(
+            base_compressor=compressor,
+            base_retriever=store.as_retriever(search_kwargs={"k": 3})
+        )        
+        # Get compressed documents
+        compressed_docs = compression_retriever.get_relevant_documents(query)
         
-        # Enhanced citation handling
-        for doc, score in results:
-            print("Score:", score, "Doc:", doc)
-            if score > 0.7:  # Adjust threshold as needed
-                continue
-                
-            # Extract metadata for citation
+        for doc in compressed_docs:
             source = doc.metadata.get("source", "Unknown Source")
-            page = doc.metadata.get("page", "Unknown")
             chunk_id = doc.metadata.get("chunk_id", "N/A")
-            doc_type = doc.metadata.get("type", "content")
             
-            # Create unique citation key
-            citation_key = f"{source}:{page}:{chunk_id}"
+            citation_key = f"{source}:{chunk_id}"
             
-            # Store both the document and detailed citation info
             context_docs.append({
                 "content": doc.page_content,
                 "citation_key": citation_key,
-                "score": score
+                "source": source
             })
             
-            # Build complete citation object
             citations.append({
                 "key": citation_key,
                 "source": source,
-                "page": page,
-                "type": doc_type,
-                "excerpt": doc.page_content[:200] + "..."  # Preview
+                "excerpt": doc.page_content[:200] + "..."
             })
 
     return context_docs, citations
 
-def generate_follow_up_hint(chat_history, mode):
-    # Extract the conversation context
-    print(chat_history)
-    conversation_context = "\n".join([f"{msg[0]}: {msg[1]}" for msg in chat_history])
-    conversation_context = conversation_context[:200]
-    print(conversation_context)
-    # Define the follow-up hint prompt
-    if st.session_state.mode == "Programming Tutor":
-        prompt = """
-        You are a programming tutor. Provide another hint or clarification based on the conversation below.
-        Keep your response concise and helpful.
-
-        Conversation:
-        {conversation_context}
-
-        Hint:
-        """
-    elif st.session_state.mode == "Rubber Duck Assistant":
-        prompt = """
-        You are a rubber duck debugging assistant. Provide another guiding question or hint to help the user think through their problem.
-
-        Conversation:
-        {conversation_context}
-
-        Hint:
-        """
-
-    # Generate the follow-up hint
-    conversation_prompt = ChatPromptTemplate.from_template(prompt)
-    response_chain = conversation_prompt | LANGUAGE_MODEL
-    return response_chain.invoke({"conversation_context": conversation_context})
-
-def get_chunk_size(query, mode):
-    if mode == "Programming Tutor" and len(query) < 50:
-        return 200
-    elif mode == "Rubber Duck Assistant":
-        return 150
-    else:
-        return 200
-# def generate_answer(query, context_docs, citations, mode):
-#     chunk_size = get_chunk_size(query, mode)
-#     context = "\n\n".join([doc.page_content[:chunk_size] for doc in context_docs])
-
-#     prompt = """
-#     You are an AI assistant that provides answers with reliable sources.
-#     Use the context below to generate an accurate response.
-    
-#     Query: {query}
-#     Context: {context}
-#     Answer:
-#     """
-    
-#     conversation_prompt = ChatPromptTemplate.from_template(prompt)
-#     response_chain = conversation_prompt | LANGUAGE_MODEL
-#     answer = response_chain.invoke({"query": query, "context": context})
-
-#     # Append citations
-#     if citations:
-#         sources = "\n".join([f"- {pdf} (Page {page})" for pdf, page in citations])
-#         answer += f"\n\n**Sources:**\n{sources}"
-
-#     return answer
-
 def generate_answer(query, context_docs, citations, mode):
-    tokenizer = AutoTokenizer.from_pretrained("gpt2")
-    prepared_context = []
-    used_citation_keys = set()
-    current_tokens = 0
+    # Prepare context with clear source attribution
+    context_with_sources = []
+    for doc in context_docs[:3]:  # Limit to top 3 most relevant contexts
+        context_with_sources.append(
+            f"SOURCE: {doc['source']}\nCONTENT:\n{doc['content'][:1000]}\n"
+        )
     
-    for doc in sorted(context_docs, key=lambda x: -x["score"]):
-        content_tokens = len(tokenizer.tokenize(doc["content"]))
-        if current_tokens + content_tokens > 700:
-            continue
-        
-        prepared_context.append(doc["content"])
-        used_citation_keys.add(doc["citation_key"])
-        current_tokens += content_tokens
+    context = "\n".join(context_with_sources)
 
-    # chunk_size = get_chunk_size(query, mode)
-    # context = "\n\n".join([doc.page_content[:chunk_size] for doc in context_docs])
-    print("Context:", prepared_context, "\n")
-    # Curriculum-based Assistant Prompt
     if mode == "Programming Tutor":
         prompt = """
         You are a python programming tutor. Explain concepts clearly with examples and best practices.
-        Keep explanations concise and beginner-friendly. Use these references etc
+        Always reference the provided context when available. If the answer isn't in the context, say so.
         
-        Query: {query}
-        Context: {context}
-        Answer:
+        Context:
+        {context}
+        
+        Question: {query}
+        
+        Answer in this format:
+        1. [Explanation]
+        2. [Example if applicable]
+        3. [Best practices]
+        4. [Sources from context]
         """
-    
-    # Rubber Duck Debugging Prompt
     elif mode == "Rubber Duck Assistant":
         prompt = """
-        You are an expert Rubber Duck Python debugging assistant. Analyze the following Python code and provide debugging hints **one at a time**.
-        Do NOT give the full solution immediately.
-        Each response should include:
-        1️⃣ The next step in debugging.
-        2️⃣ A short explanation.
-        3️⃣ if the user wants another hint, give it unless it's obvious.
+        You are a Rubber Duck debugging assistant. Help the user think through their problem step by step.
+        Use the context when relevant, but focus on guiding the user to find their own solution.
         
-        Query: {query}
-        Context: {context}
-        Answer:
+        Context:
+        {context}
+        
+        Problem: {query}
+        
+        Respond with:
+        1. [First debugging step/question]
+        2. [What to look for]
+        3. [Potential solutions from context if available]
         """
 
     conversation_prompt = ChatPromptTemplate.from_template(prompt)
     response_chain = conversation_prompt | LANGUAGE_MODEL
-    answer = response_chain.invoke({"query": query, "context": prepared_context})
+    answer = response_chain.invoke({"query": query, "context": context})
 
-    used_citations = [c for c in citations if c["key"] in used_citation_keys]
+    # Format citations for display
+    formatted_citations = "\n".join(
+        [f"🔍 Source: {cite['source']}\n   Excerpt: {cite['excerpt']}\n" 
+         for cite in citations[:3]]  # Show top 3 citations
+    )
 
-    def format_citations(citations):
-        """Format citations for display in the UI"""
-        formatted = []
-        for idx, cite in enumerate(citations, 1):
-            formatted.append(
-                f"[{idx}] {cite['source']}, page {cite['page']}\n"
-                f"Excerpt: {cite['excerpt']}\n"
-            )
-        return "\n".join(formatted)
-
-    formatted_citations = format_citations(used_citations)
-    print("Formatted Citations:",formatted_citations)
-    # cited = ""
-    # cited_pdfs = set()  # Use a set to store unique citations
-
-    # for pdf in citations:
-    #     cited_pdfs.add(f"- {pdf[0]}")  # Add citation as a formatted string
-
-    # # Append citations
-    # if cited_pdfs:
-    #     sources = "\n".join(sorted(cited_pdfs))  # Sort to maintain order if needed
-    #     cited += f"\n\n**Sources:**\n{sources}"
-
-    #     # time.sleep(20)
-    return answer,formatted_citations
+    return answer, formatted_citations, context
 
 # Sidebar - Upload PDFs
 st.sidebar.header("📤 Upload Programming Resources")
@@ -533,45 +452,34 @@ if uploaded_files:
             process_document(pdf.name, file_path)
     st.sidebar.success("✅ Documents uploaded! Select them below.")
 
-st.title("Programming Tutor "+ "&"+ " Rubber Duck Assistant")
+st.title("Programming Tutor & Rubber Duck Assistant")
 st.markdown("---")
 
 st.sidebar.header("📹 YouTube Transcript Extractor")
-st.sidebar.caption("Paste a YouTube link to extract and save the transcript.")
-
-# Input field for YouTube link
 video_url = st.sidebar.text_input("🔗 Paste YouTube link here:")
 
 if st.sidebar.button("🎬 Get Transcript"):
     if video_url:
         try:
-            # Extract Video ID
             video_id = extract_video_id(video_url)
             if not video_id:
                 st.error("❌ Invalid YouTube URL. Please check and try again.")
                 st.stop()
 
-            # Generate video name
             video_name = f"transcript_{video_id}"
-
-            # Extract transcript
             file_path, transcript_text = get_english_transcript(video_id, video_name)
 
             if file_path:
-                # Update PDF list
                 pdf_list = load_pdf_list()
                 if video_name not in pdf_list:
                     pdf_list.append(video_name)
                     save_pdf_list(pdf_list)
-
                 st.sidebar.success(f"✅ Transcript saved as: {video_name}.txt")
                 st.rerun()
             else:
                 st.error(transcript_text)
-
         except Exception as e:
             st.sidebar.error(f"❌ Error: {e}")
-
     else:
         st.warning("⚠ Please enter a valid YouTube link.")
 
@@ -584,57 +492,75 @@ st.sidebar.header("🗑️ Remove Files")
 delete_pdf = st.sidebar.selectbox("Select PDF to Remove", ["None"] + st.session_state.pdf_list)
 
 if st.sidebar.button("❌ Delete Files") and delete_pdf != "None":
-    # Delete the Chroma collection for the PDF
-    vector_store = st.session_state.pdf_vector_stores.get(delete_pdf)
-    if vector_store:
-        vector_store.delete_collection()
-    del st.session_state.pdf_vector_stores[delete_pdf]
-    st.session_state.pdf_list.remove(delete_pdf)
-    save_pdf_list(st.session_state.pdf_list)  # Save updated PDF list to disk
-    st.sidebar.success(f"Deleted {delete_pdf}")
+    try:
+        # Delete the vector store files
+        import shutil
+        shutil.rmtree(os.path.join(VECTOR_DB_PATH, delete_pdf.replace(" ", "_").lower()))
+        shutil.rmtree(os.path.join(VECTOR_DB_PATH_ERROR, delete_pdf.replace(" ", "_").lower()))
+        
+        # Remove from session state
+        if delete_pdf in st.session_state.pdf_vector_stores:
+            del st.session_state.pdf_vector_stores[delete_pdf]
+        if delete_pdf in st.session_state.error_vector_stores:
+            del st.session_state.error_vector_stores[delete_pdf]
+            
+        st.session_state.pdf_list.remove(delete_pdf)
+        save_pdf_list(st.session_state.pdf_list)
+        st.sidebar.success(f"Deleted {delete_pdf}")
+        st.rerun()
+    except Exception as e:
+        st.sidebar.error(f"Error deleting: {e}")
 
 # Chatbot Mode Selection
 mode = st.radio("Choose Assistant Mode:", ["Rubber Duck Assistant","Programming Tutor"])
 st.session_state.mode = mode
+
 # Chat Section
 if selected_pdfs:
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
+            if "context" in message:
+                with st.expander("View Context Used"):
+                    st.markdown(f'<div class="context-box">{message["context"]}</div>', unsafe_allow_html=True)
 
     user_query = st.chat_input("Ask a question about programming concepts or debugging...")
 
     if user_query:
-        # Add user query to chat history
         st.session_state.messages.append({"role": "user", "content": user_query})
         with st.chat_message("user"):
             st.markdown(user_query)
 
-        # Generate AI response
         with st.spinner("🔍 Searching resources..."):
-            if(analyse_python(user_query) == "Yes"):
+            if analyse_python(user_query) == "Yes":
                 relevant_docs, citations = find_context(user_query, selected_pdfs, st.session_state.mode)
                 flag = True
                 try:
-                    ai_response,cited = generate_answer(user_query, relevant_docs,citations, st.session_state.mode)
+                    ai_response, cited, context_used = generate_answer(user_query, relevant_docs, citations, st.session_state.mode)
                 except BadRequestError as e:
+                    flag = False
                     ai_response = "Sorry, I cannot provide a response to that query due to content filtering policies. Please rephrase your question."
             else:
                 flag = False
-                ai_response = "Sorry, I cannot provide a response to that query due to content filtering policies. Please rephrase your question."
-                st.markdown(ai_response)
-                st.session_state.messages.append({"role": "assistant", "content": ai_response})
-        # Add AI response to chat history
-        if flag:
-            with st.chat_message("assistant") :
-                st.markdown(ai_response.content)
-                st.markdown(cited)
-                st.session_state.messages.append({"role": "assistant", "content": ai_response.content})
-                st.session_state.messages.append({"role": "assistant", "content": cited})
+                ai_response = "Sorry, I can only answer Python-related questions. Please ask a Python programming question."
 
+        if flag:
+            with st.chat_message("assistant"):
+                st.markdown(ai_response.content)
+                if cited:
+                    with st.expander("References Used"):
+                        st.markdown(cited)
+                if context_used:
+                    st.session_state.messages.append({
+                        "role": "assistant", 
+                        "content": ai_response.content,
+                        "context": context_used
+                    })
+        else:
+            st.markdown(ai_response)
+            st.session_state.messages.append({"role": "assistant", "content": ai_response})
 else:
     st.warning("⚠️ Please upload and select a document to start chatting.")
-
 from streamlit.components.v1 import html
 import json
 from io import StringIO
