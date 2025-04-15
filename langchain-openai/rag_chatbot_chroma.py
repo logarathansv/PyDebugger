@@ -22,7 +22,6 @@ from docutils.core import publish_parts
 from transformers import AutoTokenizer
 from langchain.retrievers import ContextualCompressionRetriever
 from langchain.retrievers.document_compressors import LLMChainExtractor
-from diskcache import Cache
 
 if "llm_summary_generated" not in st.session_state:
     st.session_state.llm_summary_generated = False
@@ -39,7 +38,6 @@ class CustomEmbeddings(Embeddings):
 
 # Load environment variables
 load_dotenv()
-cache = Cache("~/.rag_cache")
 
 # Azure OpenAI Embeddings Configuration
 AZURE_EMBEDDING_ENDPOINT = os.getenv("AZURE_EMBEDDING_OPENAI")
@@ -349,7 +347,6 @@ def extract_text_from_csv(file_path):
     text = "\n".join(df.astype(str).apply(lambda row: ", ".join(row), axis=1))
     return text
 
-@cache.memoize()
 def find_context(query, selected_pdfs, mode):
     context_docs = []
     citations = []
@@ -392,7 +389,6 @@ def find_context(query, selected_pdfs, mode):
 
     return context_docs, citations
 
-@cache.memoize()
 def generate_answer(query, context_docs, citations, mode):
     # Prepare context with clear source attribution
     context_with_sources = []
