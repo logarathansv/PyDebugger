@@ -19,15 +19,9 @@ from typing import List
 from together import Together
 from docutils.core import publish_parts
 from transformers import AutoTokenizer
-from streamlit.components.v1 import html
-import json
 
-# Handle editor updates
-if "EDITOR_UPDATE" in st.session_state:
-    update = st.session_state.EDITOR_UPDATE
-    st.session_state[f"editor_{update['key']}"] = update["value"]
-    st.session_state.debug_code = update["value"]
-    st.rerun()
+if "llm_summary_generated" not in st.session_state:
+    st.session_state.llm_summary_generated = False
 
 class CustomEmbeddings(Embeddings):
     def __init__(self, model_name: str):
@@ -75,6 +69,9 @@ LANGUAGE_MODEL = AzureChatOpenAI(
     max_retries=10
 )
 
+st.set_page_config(
+    page_title="PyDebug",  # Replace with your desired title
+    page_icon="🔧")
 # Dark Mode UI
 st.markdown("""
     <style>
@@ -195,7 +192,8 @@ if "pdf_list" not in st.session_state:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-st.session_state.mode = "Rubber Duck Assistant"
+if "mode" not in st.session_state:
+    st.session_state.mode = "Rubber Duck Assistant"
 
 # Load existing Chroma collections
 for pdf_name in st.session_state.pdf_list:
@@ -386,7 +384,9 @@ def find_context(query, selected_pdfs, mode):
 
 def generate_follow_up_hint(chat_history, mode):
     # Extract the conversation context
-    conversation_context = "\n".join([f"{msg['role']}: {msg['content']}" for msg in chat_history])
+    print(chat_history)
+    conversation_context = "\n".join([f"{msg[0]}: {msg[1]}" for msg in chat_history])
+    conversation_context = conversation_context[:200]
     print(conversation_context)
     # Define the follow-up hint prompt
     if st.session_state.mode == "Programming Tutor":
@@ -521,10 +521,6 @@ def generate_answer(query, context_docs, citations, mode):
     #     # time.sleep(20)
     return answer,formatted_citations
 
-# UI Header
-st.title(st.session_state.mode == 'Programming Tutor' and "🏫 Programming Tutor" or "🐤 Rubber Duck Assistant")
-st.markdown("---")
-
 # Sidebar - Upload PDFs
 st.sidebar.header("📤 Upload Programming Resources")
 uploaded_files = st.sidebar.file_uploader("Upload PDF, TXT, PPTX, CSV", type=["pdf", "txt", "pptx", "csv", "rst", "md"], accept_multiple_files=True)
@@ -536,6 +532,9 @@ if uploaded_files:
             file_path = save_uploaded_file(pdf)
             process_document(pdf.name, file_path)
     st.sidebar.success("✅ Documents uploaded! Select them below.")
+
+st.title("Programming Tutor "+ "&"+ " Rubber Duck Assistant")
+st.markdown("---")
 
 st.sidebar.header("📹 YouTube Transcript Extractor")
 st.sidebar.caption("Paste a YouTube link to extract and save the transcript.")
@@ -595,8 +594,8 @@ if st.sidebar.button("❌ Delete Files") and delete_pdf != "None":
     st.sidebar.success(f"Deleted {delete_pdf}")
 
 # Chatbot Mode Selection
-st.session_state.mode = st.radio("Choose Assistant Mode:", ["Rubber Duck Assistant","Programming Tutor"])
-
+mode = st.radio("Choose Assistant Mode:", ["Rubber Duck Assistant","Programming Tutor"])
+st.session_state.mode = mode
 # Chat Section
 if selected_pdfs:
     for message in st.session_state.messages:
@@ -796,15 +795,14 @@ class DebugSandbox:
 
 def generate_answer1(query, code):
     # Enhanced debugging prompt
-    prompt = """You are a debugging assistant. Analyze the problem and provide step-by-step guidance.
+    prompt = """You are a debugging assistant. Analyze the problem and provide hint-by-hint guidance.
         Context:
         {code}
         Problem: {query}
         Provide:
-        1. Error analysis
-        2. Step-by-step solution approach
-        3. Suggested code fixes (if applicable)
-        Guidance:"""
+        1.Give a hint
+        2.Error analysis for the error and details about it
+        3.Give links/reference to same issues"""
 
     # Assuming `llm` is a function that takes a prompt and returns a response from a language model
     answer = LANGUAGE_MODEL.invoke(prompt.format(code=code, query=query))
@@ -853,6 +851,7 @@ if st.session_state.mode == "Rubber Duck Assistant":
             result = sandbox.execute_with_debug(st.session_state.debug_code)
             st.session_state.debug_result = result
             st.session_state.stored_code = code
+            st.session_state.llm_summary_generated = False
     
     if 'debug_result' in st.session_state:
         result = st.session_state.debug_result
@@ -879,7 +878,7 @@ if st.session_state.mode == "Rubber Duck Assistant":
                     else:
                         error_type = "Error"
                         error_message = last_line.strip()
-                        answer=generate_answer(error_message,code)
+                        # answer=generate_answer(error_message,code)
                     st.markdown("**Debug Summary**")
                     st.error(f"**Error Type:** `{error_type}`")
                     st.error(f"**Error Message:** `{error_message}`")
@@ -897,11 +896,13 @@ if st.session_state.mode == "Rubber Duck Assistant":
                         st.error(f"**Error Location:** Line {error_line}")
                         st.code(get_line_code(code, error_line), language='python')
 
-                    response_llm = generate_answer1(error_message,code)
-                    st.markdown(f"**Debug Summary from LLM** ")
-                    st.markdown(f"{response_llm}")
-                    st.session_state.messages.append({"role": "assistant", "content": response_llm})
-
+                    if st.session_state.llm_summary_generated == False:
+                        response_llm = generate_answer1(error_message, code)
+                        st.markdown("**Debug Summary from LLM** ")
+                        st.markdown(f"{response_llm}")
+                        st.session_state.messages.append({"role": "assistant", "content": response_llm})
+                        st.session_state.llm_summary_generated = True
+                        
                     if st.session_state.mode == "Rubber Duck Assistant" and st.session_state.messages and st.session_state.messages[-1]["role"] == "assistant":
                         if st.button("Need another hint"):
                             # Generate a follow-up hint based on the conversation context

@@ -1,0 +1,15 @@
+streamlit
+langchain
+langchain-community
+langchain-core
+langchain-openai
+openai
+pdfplumber
+python-dotenv
+youtube-transcript-api
+python-pptx
+sentence-transformers
+together
+docutils
+transformers
+chromadb
