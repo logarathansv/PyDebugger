@@ -13,3 +13,4 @@ together
 docutils
 transformers
 chromadb
+faiss-cpu
